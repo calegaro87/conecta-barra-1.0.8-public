@@ -1,0 +1,54 @@
+function required(name: string, fallback?: string) {
+  const value = process.env[name]?.trim() || fallback;
+  if (!value) {
+    console.warn(`[env] Variável ${name} não definida.`);
+    return "";
+  }
+  return value;
+}
+
+/** Tira espaços, quebras de linha e aspas que costumam vir junto ao colar um valor no painel de hospedagem. */
+function cleanSecret(value: string | undefined) {
+  return (value ?? "").trim().replace(/^(["'])(.*)\1$/s, "$2").trim();
+}
+
+const isProduction = process.env.NODE_ENV === "production";
+const jwt = required("JWT_SECRET", isProduction ? undefined : "dev-only-secret-change-me");
+if (isProduction && jwt.length < 32) {
+  throw new Error("JWT_SECRET precisa ter pelo menos 32 caracteres em produção.");
+}
+const dataEncryptionKey = process.env.DATA_ENCRYPTION_KEY?.trim() ?? "";
+if (isProduction && !dataEncryptionKey) {
+  throw new Error("DATA_ENCRYPTION_KEY precisa ser configurada em produção antes de iniciar a API.");
+}
+
+const publicUrl = process.env.PUBLIC_URL?.trim() || process.env.RENDER_EXTERNAL_URL?.trim() || "";
+
+export const ENV = {
+  isProduction,
+  cookieSecret: jwt,
+  dataEncryptionKey,
+  databaseUrl: required("DATABASE_URL"),
+  databaseSsl: process.env.DATABASE_SSL?.trim().toLowerCase() === "true",
+  /** URL pública do backend. No Render, usa automaticamente RENDER_EXTERNAL_URL. */
+  publicUrl: publicUrl.replace(/\/$/, ""),
+  /** Origens de navegador autorizadas (separadas por vírgula). O app nativo não precisa. */
+  allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "").split(",").map((item) => item.trim().replace(/\/$/, "")).filter(Boolean),
+  cookieDomain: process.env.COOKIE_DOMAIN?.trim() || undefined,
+  adminUsername: cleanSecret(process.env.ADMIN_USERNAME),
+  // Remove espaços/quebras de linha e aspas coladas por engano no painel do Render.
+  adminPassword: cleanSecret(process.env.ADMIN_PASSWORD),
+  expoAccessToken: process.env.EXPO_ACCESS_TOKEN?.trim() ?? "",
+  // Esses identificadores OAuth são públicos e também ficam no APK. Os fallbacks
+  // evitam que um serviço Render criado manualmente fique sem Google OAuth caso
+  // o Blueprint ainda não tenha sincronizado as variáveis não secretas.
+  googleWebClientId: process.env.GOOGLE_WEB_CLIENT_ID?.trim() || "470980545863-kf726hfmdfk6mml19dnc91fdk6i3u06n.apps.googleusercontent.com",
+  googleAndroidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID?.trim() || "470980545863-6588dkfremjlpl95ib1a8aespc2fcbmq.apps.googleusercontent.com",
+  /** Segredo do cliente OAuth "Web" do Google (login Google feito pelo servidor). */
+  googleWebClientSecret: cleanSecret(process.env.GOOGLE_WEB_CLIENT_SECRET),
+  /** Opcional: força o redirect URI do Google. Padrão: <URL pública>/api/auth/google/callback. */
+  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI?.trim() ?? "",
+  /** Chave de conta de serviço do Firebase (JSON ou JSON em base64) para enviar push direto pelo FCM (gratuito). */
+  firebaseServiceAccount: process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() ?? "",
+  whatsappUrl: process.env.OFFICIAL_WHATSAPP_URL?.trim() ?? "",
+};

@@ -1,0 +1,57 @@
+services:
+  - type: web
+    name: conecta-barra-api
+    runtime: node
+    region: virginia
+    # Plano GRATUITO. Ele hiberna após ~15 min sem requisições HTTP; para mitigar sem pagar, o repositório traz
+    # .github/workflows/keepalive.yml (ping a cada 5 min) e o app "acorda" o servidor ao abrir. Veja README.
+    plan: free
+    # O tempo real mantém os aparelhos conectados em memória: use SEMPRE 1 instância (sem autoescala),
+    # a menos que adicione um broker (Redis) para espalhar os eventos entre instâncias.
+    numInstances: 1
+    buildCommand: npm ci --include=dev && npm run build:server
+    startCommand: npm run start:server
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DB_CONNECTION_LIMIT
+        value: "5"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      # Gere com `openssl rand -hex 32` e cadastre manualmente no Render.
+      # Nunca coloque o valor no Git, no APK ou em respostas.
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: GOOGLE_WEB_CLIENT_ID
+        value: "470980545863-kf726hfmdfk6mml19dnc91fdk6i3u06n.apps.googleusercontent.com"
+      - key: GOOGLE_ANDROID_CLIENT_ID
+        value: "470980545863-6588dkfremjlpl95ib1a8aespc2fcbmq.apps.googleusercontent.com"
+      # Segredo do cliente OAuth "Web" do Google (Google Cloud → Credenciais). Necessário para "Continuar com Google".
+      - key: GOOGLE_WEB_CLIENT_SECRET
+        sync: false
+      # Push GRATUITO direto pelo Firebase (FCM): cole o JSON da conta de serviço (ou o JSON em base64).
+      # Precisa ser do MESMO projeto Firebase do google-services.json (project_id).
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      # Token do Expo para o envio de push (https://expo.dev → Account settings → Access tokens).
+      - key: EXPO_ACCESS_TOKEN
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      # Origens de NAVEGADOR autorizadas (vírgula). O app Android não precisa. Deixe vazio se não usa versão web.
+      - key: ALLOWED_ORIGINS
+        value: ""
