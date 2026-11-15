@@ -18,7 +18,7 @@ tempo real, biometria e canais oficiais.
 | **Push instável** | Dependia do Expo Push Service + chave FCM no EAS; e o `google-services.json` é do projeto Firebase **`conecta-barra-6799b`**, enquanto a documentação antiga citava **`conecta-barra-c2648`** (se a chave de serviço for de outro projeto: `MismatchSenderId`/`InvalidCredentials`). | **Push direto pelo FCM (gratuito)**, sem Expo no meio (veja seção 4). Expo continua como reserva. |
 | **Render Free hiberna** | Sem acessos por ~15 min o serviço dorme; o primeiro acesso demora 30–60 s. | `keepalive.yml` (GitHub Actions, ping a cada 5 min) + o app "acorda" o servidor ao abrir. Sem pagar nada. |
 
-Novo endpoint de diagnóstico **sem segredos**: `https://conecta-barra-api.onrender.com/api/health/config`
+Novo endpoint de diagnóstico **sem segredos**: `https://conecta-barra-api-k4xh.onrender.com/api/health/config`
 (mostra se banco, senha admin, Google e push estão configurados e qual redirect URI cadastrar).
 
 ## 2. Configuração (faça nesta ordem)
@@ -41,7 +41,7 @@ Depois de salvar, o Render reinicia. Abra `/api/health/config` e confira os `tru
 1. https://console.cloud.google.com → projeto número **470980545863** → *APIs e serviços → Credenciais*.
 2. Abra o cliente **"Aplicativo da Web"** (ID `470980545863-kf726hfm…`).
 3. Em **URIs de redirecionamento autorizados** adicione exatamente:
-   `https://conecta-barra-api.onrender.com/api/auth/google/callback`
+   `https://conecta-barra-api-k4xh.onrender.com/api/auth/google/callback`
    (o valor exato também aparece em `/api/health/config` → `googleRedirectUriToRegister`).
 4. Copie o **Segredo do cliente** para `GOOGLE_WEB_CLIENT_SECRET` no Render.
 5. Tela de consentimento OAuth: se estiver em "Teste", adicione os e-mails testadores ou publique o app.

@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Acordar API
         env:
-          API_URL: ${{ vars.API_URL || 'https://conecta-barra-api.onrender.com' }}
+          API_URL: ${{ vars.API_URL || 'https://conecta-barra-api-k4xh.onrender.com' }}
         run: |
           for i in 1 2 3; do
             if curl -fsS --max-time 70 "$API_URL/api/health"; then echo; exit 0; fi

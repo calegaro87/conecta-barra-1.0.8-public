@@ -59,9 +59,7 @@ export default function LoginScreen() {
     else await AsyncStorage.multiRemove(["dm_saved_username", "dm_remember_me"]);
     await setSessionToken(result.token);
     await setUserInfo(result.user);
-    // Uma conta Google nova precisa completar o cadastro antes de acessar a
-    // área inicial. Navegar diretamente evita que o estado inicial das abas
-    // devolva o usuário para a tela de início.
+    // Usuários com cadastro incompleto devem concluir o perfil antes de acessar a área inicial.
     if (result.user.role !== "admin" && !profileComplete) {
       router.replace("/(tabs)/profile");
       return;

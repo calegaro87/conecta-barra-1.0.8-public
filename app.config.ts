@@ -7,8 +7,8 @@ const PACKAGE_ID = "com.conectabarra.app"; // troque se tiver um domínio própr
 // Valores padrão de PRODUÇÃO. Importante: `eas update` (OTA) roda na sua máquina e NÃO lê o `env` do eas.json.
 // Sem estes padrões, uma atualização OTA publicada sem .env sairia sem `updates.url` e com a API apontando
 // para http://10.0.2.2:3000, quebrando o app de todos os usuários. Mantenha iguais aos do eas.json.
-const DEFAULT_API_URL = "https://conecta-barra-api.onrender.com";
-const DEFAULT_EAS_PROJECT_ID = "c87bc760-536b-44e8-bf16-06ea027209d0";
+const DEFAULT_API_URL = "https://conecta-barra-api-k4xh.onrender.com";
+const DEFAULT_EAS_PROJECT_ID = "ef0c3efd-b796-41c9-a95d-8efa76199042";
 const projectId = (process.env.EXPO_PUBLIC_EAS_PROJECT_ID?.trim() || DEFAULT_EAS_PROJECT_ID);
 // Em `expo start` (NODE_ENV=development) mantém o servidor local; em build/OTA usa a produção.
 const apiUrl = process.env.EXPO_PUBLIC_API_URL?.trim() || (process.env.NODE_ENV === "development" ? "" : DEFAULT_API_URL);
@@ -16,16 +16,16 @@ const apiUrl = process.env.EXPO_PUBLIC_API_URL?.trim() || (process.env.NODE_ENV 
 const config: ExpoConfig = {
   name: "Conecta Barra",
   slug: "conecta-barra",
-  owner: "conectabarras-team",
+  owner: "conectabarraapks-team",
   version: "1.0.8",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
-  // O login Google agora é feito pelo servidor e volta ao app por conectabarra://google-auth.
+  // Esquema reservado para navegação interna e links profundos do aplicativo.
   scheme: "conectabarra",
   userInterfaceStyle: "automatic",
   newArchEnabled: true,
   // Atualizações OTA reais (EAS Update). Ficam ativas assim que o projeto EAS for criado (eas init).
-  ...(projectId ? { runtimeVersion: { policy: "appVersion" as const }, updates: { url: `https://u.expo.dev/${projectId}`, fallbackToCacheTimeout: 0, checkAutomatically: "ON_LOAD" as const } } : {}),
+  ...(projectId ? { runtimeVersion: "1.0.8", updates: { url: `https://u.expo.dev/${projectId}`, fallbackToCacheTimeout: 0, checkAutomatically: "ON_LOAD" as const } } : {}),
   ios: { supportsTablet: true, bundleIdentifier: PACKAGE_ID, infoPlist: { ITSAppUsesNonExemptEncryption: false } },
   android: {
     package: PACKAGE_ID,
