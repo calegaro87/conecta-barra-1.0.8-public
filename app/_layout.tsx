@@ -87,7 +87,6 @@ export default function RootLayout() {
           <Stack screenOptions={{ animation: "slide_from_right", animationDuration: 260, gestureEnabled: true, headerShown: true, headerTitle: "Conecta Barra", headerTitleStyle: { color: "#FFFFFF", fontSize: 16, fontWeight: "900" }, headerStyle: { backgroundColor: "#0B5FD8" }, headerTintColor: "#FFFFFF", headerShadowVisible: false, headerBackVisible: false, headerLeft: () => <HeaderBackButton /> }}>
             <Stack.Screen name="(tabs)" options={{ headerShown: true }} />
             <Stack.Screen name="login" options={{ animation: "fade" }} />
-            <Stack.Screen name="google-auth" options={{ headerShown: false, animation: "fade", gestureEnabled: false }} />
           </Stack>
           <PushNotificationBridge />
           <RealtimeProvider />

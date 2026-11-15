@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { TextInput } from "@/components/text-input";
 import { Pressable } from "@/components/pressable";
 import * as LocalAuthentication from "expo-local-authentication";
@@ -20,12 +20,7 @@ import { AddressFields, emptyAddress, isAddressComplete, type AddressValue } fro
 import { SelectionField } from "@/components/selection-field";
 import { BRAND } from "@/constants/brand";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import * as WebBrowser from "expo-web-browser";
-import { getApiBaseUrl } from "@/constants/oauth";
-import { GOOGLE_APP_REDIRECT, wasGoogleTicketHandled } from "@/lib/google-login";
 import { warmUpServer } from "@/lib/warmup";
-
-WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const colors = useColors();
@@ -59,30 +54,6 @@ export default function LoginScreen() {
   const [verificationCode, setVerificationCode] = useState("");
   const [verificationVisible, setVerificationVisible] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
-  // Login Google feito pelo servidor: abre o navegador do sistema em /api/auth/google/start. Ao final o
-  // servidor devolve o usuário ao app por conectabarra://google-auth?ticket=… (tratado em app/google-auth.tsx).
-  const [googleBusy, setGoogleBusy] = useState(false);
-  const startGoogleLogin = async () => {
-    if (googleBusy) return;
-    setGoogleBusy(true);
-    try {
-      const result = await WebBrowser.openAuthSessionAsync(`${getApiBaseUrl()}/api/auth/google/start`, GOOGLE_APP_REDIRECT);
-      if (result.type === "success" && result.url) {
-        // Rede de segurança: se o roteador não abriu a tela de retorno sozinho, abre aqui.
-        const query = result.url.split("?")[1] ?? "";
-        const params = new URLSearchParams(query);
-        const ticket = params.get("ticket");
-        const error = params.get("error");
-        await new Promise((resolve) => setTimeout(resolve, 900));
-        if (ticket && !wasGoogleTicketHandled(ticket)) router.push({ pathname: "/google-auth", params: { ticket } });
-        else if (error) router.push({ pathname: "/google-auth", params: { error } });
-      }
-    } catch (error) {
-      Alert.alert("Não foi possível entrar com Google", error instanceof Error ? error.message : "Tente novamente.");
-    } finally {
-      setGoogleBusy(false);
-    }
-  };
   const persistSessionAndOpenHome = async (result: { user: any; token: string }, message: string, profileComplete = true) => {
     if (rememberMe) await AsyncStorage.multiSet([["dm_saved_username", username.trim()], ["dm_remember_me", "true"]]);
     else await AsyncStorage.multiRemove(["dm_saved_username", "dm_remember_me"]);
@@ -184,7 +155,7 @@ export default function LoginScreen() {
   };
 
   useEffect(() => { warmUpServer(); }, []);
-  const busy = login.isPending || register.isPending || googleBusy;
+  const busy = login.isPending || register.isPending;
   const verificationBusy = verifyEmail.isPending || resendVerification.isPending;
   useEffect(() => { if (biometricAvailable && autoPrompt.current && !registering) { autoPrompt.current = false; void loginWithBiometric(); } }, [biometricAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
   if (verificationVisible) {
@@ -227,13 +198,6 @@ export default function LoginScreen() {
               <Pressable accessibilityRole="button" accessibilityLabel="Entrar com biometria" onPress={() => void loginWithBiometric()} disabled={biometricPending} style={({ pressed }) => [ns.bioButton, { backgroundColor: colors.primary + "14", borderColor: colors.primary }, pressed && { opacity: 0.75 }]}>
                 <IconSymbol name="fingerprint" size={34} color={colors.primary} />
                 <View style={{ flex: 1 }}><Text style={[ns.bioTitle, { color: colors.primary }]}>{biometricPending ? "Verificando…" : "Entrar com biometria"}</Text><Text style={[ns.bioHint, { color: colors.muted }]}>Digital ou reconhecimento facial</Text></View>
-              </Pressable>
-            )}
-
-            {!registering && (
-              <Pressable accessibilityRole="button" disabled={busy} onPress={() => void startGoogleLogin()} style={({ pressed }) => [ns.googleButton, { borderColor: colors.border, backgroundColor: colors.surface }, pressed && { opacity: 0.75 }]}>
-                <Image source={require("@/assets/images/google-g.png")} accessibilityLabel="Logotipo Google" style={ns.googleMark} />
-                <Text style={[ns.googleLabel, { color: colors.foreground }]}>{googleBusy ? "Abrindo o Google…" : "Continuar com Google"}</Text>
               </Pressable>
             )}
 
@@ -343,9 +307,6 @@ const ns = StyleSheet.create({
   field: { minHeight: 54, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, fontSize: 15 },
   bioButton: { flexDirection: "row", alignItems: "center", gap: 14, borderWidth: 1.5, borderRadius: 22, padding: 14, marginBottom: 6, shadowColor: "#0B3B8C", shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 2 },
   bioTitle: { fontSize: 16, fontWeight: "900" }, bioHint: { fontSize: 12 },
-  googleButton: { minHeight: 54, borderWidth: 1, borderRadius: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 4 },
-  googleMark: { width: 22, height: 22 },
-  googleLabel: { fontSize: 15, fontWeight: "800" },
   sexRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sexChip: { borderWidth: 1.5, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9 },
   rememberRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 },
