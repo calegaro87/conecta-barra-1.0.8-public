@@ -5,7 +5,7 @@ import * as Device from "expo-device";
 import { Alert, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { TextInput } from "@/components/text-input";
 import { Pressable } from "@/components/pressable";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { Image } from "expo-image";
@@ -42,6 +42,7 @@ export default function AdminDashboard() {
   const [statusFilter, setStatusFilter] = useState<(typeof statusFilters)[number]["value"]>("all");
   const [periodFilter, setPeriodFilter] = useState<(typeof periodFilters)[number]["value"]>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const scrollViewRef = useRef<ScrollView>(null);
   const shortageReport = trpc.reports.waterShortage.useQuery(undefined, { enabled: false });
   const [bairro, setBairro] = useState<string | undefined>(undefined);
   const bairros = trpc.neighborhoods.list.useQuery(undefined, { staleTime: 5 * 60_000 });
@@ -131,6 +132,21 @@ export default function AdminDashboard() {
   ]);
   const toneColor = (tone: "warning" | "primary" | "success" | "error") => colors[tone];
   const statusColor = (status: string) => ({ received: colors.primary, reviewing: "#D97706", forwarded: "#7C3AED", in_progress: "#0284C7", completed: colors.success, cancelled: colors.error }[status] ?? colors.muted);
+  const focusRequests = (status?: (typeof statusFilters)[number]["value"]) => {
+    if (status) setStatusFilter(status);
+    requestAnimationFrame(() => scrollViewRef.current?.scrollToEnd({ animated: true }));
+  };
+  const openIndicator = (label: string) => {
+    if (label === "Cadastros pendentes") return router.push("/admin/residents");
+    if (label === "Avisos não lidos") return router.push("/notifications");
+    if (label === "E-mails com falha") return router.push("/admin/audit" as never);
+    focusRequests("all");
+  };
+  const openMetric = (label: string) => {
+    if (label === "Em aberto") return focusRequests("all");
+    if (label === "Em andamento") return focusRequests("in_progress");
+    if (label === "Concluídas") return focusRequests("completed");
+  };
 
   const exportWaterShortagePdf = async () => {
     try {
@@ -153,7 +169,7 @@ export default function AdminDashboard() {
         <Text style={{ color: "#FFFFFF", fontSize: 26, fontWeight: "900", letterSpacing: -0.4 }}>Conecta Barra</Text>
         <Text style={{ color: "#DDF0FF", fontSize: 14, marginTop: 4 }}>{bairro ? `Filtrando pelo bairro ${bairro}` : "Visão geral da cidade"}</Text>
       </GradientHeader>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingTop: 14 }]}>
+      <ScrollView ref={scrollViewRef} showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, { paddingHorizontal: 20, paddingTop: 14 }]}>
         <View style={styles.header}>
 
           <View style={styles.headerActions}>
@@ -195,10 +211,11 @@ export default function AdminDashboard() {
               { label: "Avisos não lidos", value: adminSummary.data?.unreadNotifications ?? 0, color: colors.error },
               { label: "E-mails com falha", value: adminSummary.data?.email.failed ?? 0, color: adminSummary.data?.email.failed ? colors.error : colors.success },
             ].map((item) => (
-              <View key={item.label} style={[styles.adminSummaryItem, { backgroundColor: item.color + "12" }]}>
+              <Pressable key={item.label} accessibilityRole="button" accessibilityLabel={`Abrir ${item.label}`} onPress={() => openIndicator(item.label)} style={({ pressed }) => [styles.adminSummaryItem, { backgroundColor: item.color + "12" }, pressed && styles.pressed]}>
                 <Text style={[styles.adminSummaryValue, { color: item.color }]}>{item.value}</Text>
-            <Text style={styles.adminSummaryLabel}>{item.label}</Text>
-              </View>
+                <Text style={styles.adminSummaryLabel}>{item.label}</Text>
+                <Text style={[styles.cardActionHint, { color: item.color }]}>Toque para abrir</Text>
+              </Pressable>
             ))}
           </View>
           {emailDelivery.data && emailDelivery.data.length > 0 && (
@@ -232,11 +249,12 @@ export default function AdminDashboard() {
         </View>
         <View style={styles.metrics}>
           {metrics.map((metric) => (
-            <View key={metric.label} style={[styles.metric, { backgroundColor: toneColor(metric.tone) + "0D" }]}>
+            <Pressable key={metric.label} accessibilityRole="button" accessibilityLabel={`Abrir solicitações ${metric.label}`} onPress={() => openMetric(metric.label)} style={({ pressed }) => [styles.metric, { backgroundColor: toneColor(metric.tone) + "0D" }, pressed && styles.pressed]}>
               <View style={[styles.metricIcon, { backgroundColor: toneColor(metric.tone) + "18" }]}><IconSymbol name={metric.icon} size={19} color={toneColor(metric.tone)} /></View>
               <Text style={[styles.metricValue, { color: colors.foreground }]}>{metric.value}</Text>
               <Text style={styles.metricLabel}>{metric.label}</Text>
-            </View>
+              <Text style={[styles.cardActionHint, { color: toneColor(metric.tone) }]}>Toque para filtrar</Text>
+            </Pressable>
           ))}
         </View>
 
@@ -358,6 +376,7 @@ const styles = StyleSheet.create({
   adminSummaryItem: { width: "48%", minHeight: 72, borderWidth: 0, borderRadius: 14, padding: 10, justifyContent: "center" },
   adminSummaryValue: { fontSize: 23, lineHeight: 27, fontWeight: "900" },
   adminSummaryLabel: { fontSize: 11, lineHeight: 15, marginTop: 3, fontWeight: "900", color: "#000000" },
+  cardActionHint: { fontSize: 9, lineHeight: 12, marginTop: 4, fontWeight: "800" },
   emailLogBox: { borderTopWidth: 1, marginTop: 14, paddingTop: 12 },
   emailLogTitle: { fontSize: 13, fontWeight: "900", marginBottom: 6 },
   emailLogRow: { minHeight: 28, flexDirection: "row", alignItems: "center", gap: 7 },

@@ -78,6 +78,13 @@ function getGmailConfig() {
   return { sender: validateEmail(sender), appPassword };
 }
 
+export function getEmailConfigurationStatus() {
+  const brevoSender = (process.env.BREVO_SENDER_EMAIL ?? process.env.GMAIL_SENDER_EMAIL ?? "").trim();
+  const brevoConfigured = Boolean(BREVO_API_KEY && brevoSender);
+  const smtpConfigured = Boolean(process.env.GMAIL_SENDER_EMAIL?.trim() && process.env.GMAIL_APP_PASSWORD?.trim());
+  return { configured: brevoConfigured || smtpConfigured, provider: brevoConfigured ? "brevo" : smtpConfigured ? "smtp" : "none", brevoConfigured, smtpConfigured } as const;
+}
+
 function readReply(socket: tls.TLSSocket) {
   return new Promise<string>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -199,7 +206,10 @@ async function sendBrevoEmail(message: EmailMessage, meta: EmailDeliveryMeta) {
 }
 
 function sendEmail(message: EmailMessage, meta: EmailDeliveryMeta) {
-  return BREVO_API_KEY ? sendBrevoEmail(message, meta) : sendGmailEmail(message, meta);
+  const status = getEmailConfigurationStatus();
+  if (status.provider === "brevo") return sendBrevoEmail(message, meta);
+  if (status.provider === "smtp") return sendGmailEmail(message, meta);
+  throw new Error("Nenhum provedor de e-mail está configurado. Configure BREVO_API_KEY + BREVO_SENDER_EMAIL ou GMAIL_SENDER_EMAIL + GMAIL_APP_PASSWORD no Render.");
 }
 
 export function buildVerificationEmail(input: { name: string; email: string; code: string }): EmailMessage {

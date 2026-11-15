@@ -23,6 +23,10 @@ import { consumeGoogleTicket } from "./google-oauth";
 import { fcmConfigured } from "./fcm";
 
 const categorySchema = z.enum(CATEGORY_VALUES);
+const normalizeUsername = (value: unknown) => typeof value === "string"
+  ? value.trim().toLowerCase().replace(/^@+/, "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9_.-]+/g, "-").replace(/-+/g, "-").replace(/^[._-]+|[._-]+$/g, "").slice(0, 64)
+  : value;
+const registrationUsernameSchema = z.preprocess(normalizeUsername, z.string().min(4).max(64).regex(/^[a-zA-Z0-9_.-]+$/));
 const addressSchema = {
   cep: z.string().regex(/^\d{5}-?\d{3}$/, "Informe um CEP válido."),
   street: z.string().min(2).max(255),
@@ -82,7 +86,7 @@ export const appRouter = router({
     emailDelivery: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).optional() }).optional()).query(({ input }) => db.listEmailDeliveryLogs(input?.limit ?? 100)),
   }),
   auth: router({
-    register: publicProcedure.input(z.object({ username: z.string().min(4).max(64).regex(/^[a-zA-Z0-9_.-]+$/), password: z.string().min(8).max(128), name: z.string().min(3).max(120), email: z.string().email().optional(), ...addressSchema, phone: z.string().min(8).max(32), sex: z.enum(["female", "male", "non_binary", "prefer_not_to_say"]) })).mutation(async ({ ctx, input }) => {
+    register: publicProcedure.input(z.object({ username: registrationUsernameSchema, password: z.string().min(8).max(128), name: z.string().min(3).max(120), email: z.string().email().optional(), ...addressSchema, phone: z.string().min(8).max(32), sex: z.enum(["female", "male", "non_binary", "prefer_not_to_say"]) })).mutation(async ({ ctx, input }) => {
       const username = input.username.trim().toLowerCase();
       const email = input.email?.trim().toLowerCase() ?? "";
       if (await db.getResidentCredentialByUsername(username)) throw new TRPCError({ code: "CONFLICT", message: "Este nome de usuário já está em uso." });

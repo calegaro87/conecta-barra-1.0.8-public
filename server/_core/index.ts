@@ -12,6 +12,7 @@ import { storageGet } from "../storage";
 import * as db from "../db";
 import { registerGoogleOAuthRoutes, googleWebFlowConfigured, googleRedirectUri } from "../google-oauth";
 import { fcmConfigured, fcmProjectId } from "../fcm";
+import { getEmailConfigurationStatus } from "../email";
 
 /** Limitador simples em memória (por IP) para rotas sensíveis. Para vários servidores, use Redis. */
 function rateLimit(windowMs: number, max: number) {
@@ -92,6 +93,8 @@ async function startServer() {
       pushFcmConfigured: fcmConfigured(),
       pushFcmProject: fcmProjectId(),
       pushExpoFallback: true,
+      emailConfigured: getEmailConfigurationStatus().configured,
+      emailProvider: getEmailConfigurationStatus().provider,
       version: "1.0.8",
     });
   });

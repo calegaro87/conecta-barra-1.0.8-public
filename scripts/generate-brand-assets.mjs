@@ -82,7 +82,33 @@ function render(width, height, shader) {
   }
   return buf;
 }
-const save = (dir, name, w, h, shader) => { writeFileSync(path.join(dir, name), encodePng(w, h, render(w, h, shader))); console.log(`[brand] ${path.relative(process.cwd(), path.join(dir, name))} (${w}×${h})`); };
+/**
+ * Remove um possível halo claro introduzido por redimensionamento/captura na
+ * borda azul esquerda do ícone. A faixa fica fora da área segura do símbolo
+ * branco; por isso a operação não altera o desenho central.
+ */
+function cleanBlueEdge(name, width, height, rgba) {
+  if ((name !== "icon.png" && name !== "android-icon-background.png") || width !== 1024 || height !== 1024) return rgba;
+  const x = 127; // x≈15/121, posição observada na referência do usuário
+  const y0 = 398; // y≈49/126
+  const y1 = 687; // y≈84/126
+  for (let y = y0; y <= y1; y++) {
+    const dst = (y * width + x) * 4;
+    const src = (y * width + x + 1) * 4;
+    // Copia a cor azul imediatamente vizinha e mantém o canal alfa opaco.
+    rgba[dst] = rgba[src];
+    rgba[dst + 1] = rgba[src + 1];
+    rgba[dst + 2] = rgba[src + 2];
+    rgba[dst + 3] = rgba[src + 3];
+  }
+  return rgba;
+}
+
+const save = (dir, name, w, h, shader) => {
+  const rgba = cleanBlueEdge(name, w, h, render(w, h, shader));
+  writeFileSync(path.join(dir, name), encodePng(w, h, rgba));
+  console.log(`[brand] ${path.relative(process.cwd(), path.join(dir, name))} (${w}×${h})`);
+};
 
 /** Marca (pin + ponte) numa escala/posição, em coordenadas normalizadas u,v (0–1). */
 function mark(u, v, { scale = 1, cx = 0.5, cy = 0.5, hole = "blue" } = {}) {

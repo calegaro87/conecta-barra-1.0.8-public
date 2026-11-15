@@ -22,6 +22,19 @@ import { BRAND } from "@/constants/brand";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { warmUpServer } from "@/lib/warmup";
 
+function normalizeRegistrationUsername(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 64);
+}
+
 export default function LoginScreen() {
   const colors = useColors();
   const [registering, setRegistering] = useState(false);
@@ -115,6 +128,7 @@ export default function LoginScreen() {
     if (/401|inválidos/i.test(message)) return "Nome de usuário ou senha incorretos.";
     if (/403|aguarda aprovação|bloqueado/i.test(message)) return message;
     if (/409|já está em uso/i.test(message)) return "Esse nome de usuário já está cadastrado. Escolha outro.";
+    if (/invalid_format|must match pattern|formato inválido/i.test(message)) return "O usuário deve conter apenas letras, números, ponto, hífen ou sublinhado.";
     return message || "Não foi possível concluir a operação. Tente novamente.";
   };
   const login = trpc.auth.login.useMutation({
@@ -135,10 +149,10 @@ export default function LoginScreen() {
   });
 
   const submit = () => {
-    const normalizedUsername = username.trim();
+    const normalizedUsername = registering ? normalizeRegistrationUsername(username) : username.trim();
     // O tamanho mínimo só vale para CRIAR cadastro. No login não pode haver mínimo: a senha da gestão pode ser curta e
     // contas antigas também; quem confere é o servidor.
-    if (normalizedUsername.length < (registering ? 4 : 1)) return Alert.alert("Informe o usuário", registering ? "O nome de usuário precisa ter pelo menos 4 caracteres." : "Digite seu usuário.");
+    if (normalizedUsername.length < (registering ? 4 : 1)) return Alert.alert("Informe o usuário", registering ? "Use pelo menos 4 caracteres: letras, números, ponto, hífen ou sublinhado." : "Digite seu usuário.");
     if (registering ? password.length < 8 : password.length < 1) return Alert.alert("Informe a senha", registering ? "A senha precisa ter pelo menos 8 caracteres." : "Digite sua senha.");
     if (registering) {
       if (!privacyAccepted) return Alert.alert("Aceite a política de privacidade", "Leia e aceite a política de privacidade para criar seu acesso.");
@@ -206,6 +220,7 @@ export default function LoginScreen() {
 
             <Text style={[ns.label, { color: colors.foreground }]}>Usuário</Text>
             <TextInput accessibilityLabel="Usuário" value={username} onChangeText={setUsername} autoCapitalize="none" autoCorrect={false} placeholder="seu.usuario" placeholderTextColor={colors.muted} style={input} />
+            {registering && <Text style={[ns.hint, { color: colors.muted }]}>Aceita letras, números, ponto, hífen e sublinhado. Espaços e acentos serão ajustados automaticamente.</Text>}
             <Text style={[ns.label, { color: colors.foreground }]}>Senha</Text>
             <PasswordField value={password} onChangeText={setPassword} placeholder={registering ? "Mínimo de 8 caracteres" : "Sua senha"} colors={colors} />
 
@@ -302,6 +317,7 @@ const ns = StyleSheet.create({
   title: { fontSize: 24, fontWeight: "900" },
   sub: { fontSize: 14, lineHeight: 20, marginBottom: 8 },
   label: { fontSize: 13, fontWeight: "800", marginTop: 8 },
+  hint: { fontSize: 11, lineHeight: 16, marginTop: -2 },
   field: { minHeight: 54, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, fontSize: 15 },
   bioButton: { flexDirection: "row", alignItems: "center", gap: 14, borderWidth: 1.5, borderRadius: 22, padding: 14, marginBottom: 6, shadowColor: "#0B3B8C", shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 2 },
   bioTitle: { fontSize: 16, fontWeight: "900" }, bioHint: { fontSize: 12 },
