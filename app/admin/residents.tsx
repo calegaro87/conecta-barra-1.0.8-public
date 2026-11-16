@@ -143,9 +143,20 @@ export default function ResidentsManagementScreen() {
     onError: (error) => Alert.alert("Não foi possível redefinir", error.message),
   });
 
-  const allUsers = useMemo(() => (users.data?.items ?? []) as UserRecord[], [users.data?.items]);
-  const counts = users.data?.counts ?? { all: 0, pending: 0, approved: 0, blocked: 0, admins: 0, residents: 0 };
-  const totalUsers = users.data?.total ?? 0;
+  const allUsers = useMemo(() => {
+    const payload = users.data as unknown;
+    return (Array.isArray(payload) ? payload : (payload as { items?: UserRecord[] } | null)?.items ?? []) as UserRecord[];
+  }, [users.data]);
+  const fallbackCounts = useMemo(() => ({
+    all: allUsers.length,
+    pending: allUsers.filter((item) => item.residentStatus === "pending").length,
+    approved: allUsers.filter((item) => item.residentStatus === "approved").length,
+    blocked: allUsers.filter((item) => item.residentStatus === "blocked").length,
+    admins: allUsers.filter((item) => item.role === "admin").length,
+    residents: allUsers.filter((item) => item.role === "user").length,
+  }), [allUsers]);
+  const counts = ((users.data as unknown as { counts?: typeof fallbackCounts } | null)?.counts ?? fallbackCounts);
+  const totalUsers = (users.data as unknown as { total?: number } | null)?.total ?? allUsers.length;
   const pageNumber = Math.floor(offset / PAGE_SIZE) + 1;
   const pageCount = Math.max(1, Math.ceil(totalUsers / PAGE_SIZE));
 

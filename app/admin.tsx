@@ -43,6 +43,16 @@ const attentionFilters = [
   { value: "unanswered", label: "Sem resposta há 24h+" },
   { value: "overdue", label: "Atrasadas há 72h+" },
 ] as const;
+type AdminRequestRow = {
+  id: number;
+  category: string;
+  status: string;
+  createdAt: Date | string;
+  isUrgent: boolean;
+  fullAddress: string;
+  requesterName: string | null;
+  requesterUsername: string | null;
+};
 
 export default function AdminDashboard() {
   const colors = useColors();
@@ -70,9 +80,23 @@ export default function AdminDashboard() {
   const adminSummary = trpc.admin.dashboard.useQuery(bairro ? { neighborhood: bairro } : undefined, { refetchInterval: 45_000, refetchIntervalInBackground: false, staleTime: 8_000, retry: false });
   const emailDelivery = trpc.admin.emailDelivery.useQuery({ limit: 5 }, { refetchInterval: 45_000, refetchIntervalInBackground: false, staleTime: 8_000, retry: false });
   const unreadNotificationCount = (notificationQuery.data ?? []).filter((item) => !item.readAt).length;
-  const requestRows = useMemo(() => allRequests.data?.items ?? [], [allRequests.data?.items]);
-  const requestSummary = allRequests.data?.summary ?? { total: 0, received: 0, reviewing: 0, forwarded: 0, inProgress: 0, completed: 0, urgent: 0, unanswered: 0, overdue: 0 };
-  const requestTotal = allRequests.data?.total ?? 0;
+  const requestRows = useMemo<AdminRequestRow[]>(() => {
+    const payload = allRequests.data as unknown;
+    return (Array.isArray(payload) ? payload : (payload as { items?: AdminRequestRow[] } | null)?.items ?? []) as AdminRequestRow[];
+  }, [allRequests.data]);
+  const fallbackRequestSummary = useMemo(() => ({
+    total: requestRows.length,
+    received: requestRows.filter((item) => item.status === "received").length,
+    reviewing: requestRows.filter((item) => item.status === "reviewing").length,
+    forwarded: requestRows.filter((item) => item.status === "forwarded").length,
+    inProgress: requestRows.filter((item) => item.status === "in_progress").length,
+    completed: requestRows.filter((item) => item.status === "completed").length,
+    urgent: requestRows.filter((item) => item.isUrgent && ["received", "reviewing", "forwarded", "in_progress"].includes(item.status)).length,
+    unanswered: requestRows.filter((item) => item.status === "received" && Date.now() - new Date(item.createdAt).getTime() >= 24 * 60 * 60 * 1000).length,
+    overdue: requestRows.filter((item) => ["received", "reviewing", "forwarded", "in_progress"].includes(item.status) && Date.now() - new Date(item.createdAt).getTime() >= 72 * 60 * 60 * 1000).length,
+  }), [requestRows]);
+  const requestSummary = ((allRequests.data as unknown as { summary?: typeof fallbackRequestSummary } | null)?.summary ?? fallbackRequestSummary);
+  const requestTotal = (allRequests.data as unknown as { total?: number } | null)?.total ?? requestRows.length;
   const requestPage = Math.floor(requestOffset / REQUEST_PAGE_SIZE) + 1;
   const requestPageCount = Math.max(1, Math.ceil(requestTotal / REQUEST_PAGE_SIZE));
   const metrics = useMemo(() => [
