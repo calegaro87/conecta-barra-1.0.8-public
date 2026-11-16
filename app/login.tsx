@@ -140,7 +140,7 @@ export default function LoginScreen() {
     onError: (error) => Alert.alert("Não foi possível cadastrar", friendlyError(error)),
   });
   const verifyEmail = trpc.auth.verifyEmail.useMutation({
-    onSuccess: (result) => { setVerificationVisible(false); Alert.alert("E-mail confirmado", result.adminEmailSent ? "Seu cadastro foi confirmado e a gestão recebeu os dados. Aguarde a aprovação para entrar." : "Seu e-mail foi confirmado. Aguarde a aprovação da gestão."); setRegistering(false); setUsername(verificationUsername); setPassword(""); },
+    onSuccess: (result) => { setVerificationVisible(false); Alert.alert("E-mail confirmado", result.adminEmailSent ? "Seu cadastro foi confirmado e a gestão recebeu os dados. Seu acesso já está disponível." : "Seu e-mail foi confirmado. Seu acesso já está disponível."); setRegistering(false); setUsername(verificationUsername); setPassword(""); },
     onError: (error) => Alert.alert("Não foi possível confirmar", friendlyError(error)),
   });
   const resendVerification = trpc.auth.resendVerification.useMutation({

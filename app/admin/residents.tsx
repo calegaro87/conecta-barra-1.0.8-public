@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from "react-native";
 import { TextInput } from "@/components/text-input";
 import { Pressable } from "@/components/pressable";
@@ -44,6 +44,7 @@ type RoleFilter = (typeof roleFilters)[number];
 type PeriodFilter = (typeof periodFilters)[number]["value"];
 type ResidentStatus = keyof typeof statusLabels;
 type SortMode = "recent" | "name";
+const PAGE_SIZE = 50;
 
 type UserRecord = {
   id: number;
@@ -92,18 +93,35 @@ function displayValue(value: string | number | null | undefined) {
 
 export default function ResidentsManagementScreen() {
   const colors = useColors();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("all");
   const [neighborhoodFilter, setNeighborhoodFilter] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
-  const [sortMode, setSortMode] = useState<SortMode>("recent");
+  const [sortMode, setSortMode] = useState<SortMode>("name");
+  const [offset, setOffset] = useState(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null);
 
-  const users = trpc.residents.all.useQuery(undefined, { refetchInterval: 30_000, staleTime: 2_000, retry: 1 });
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+  useEffect(() => { setOffset(0); }, [search, statusFilter, roleFilter, periodFilter, neighborhoodFilter, locationFilter, sortMode]);
+  const users = trpc.residents.all.useQuery({
+    search: search || undefined,
+    status: statusFilter === "all" ? undefined : statusFilter,
+    role: roleFilter === "all" ? undefined : roleFilter,
+    periodDays: periodFilter === "all" ? undefined : Number(periodFilter),
+    neighborhood: neighborhoodFilter || undefined,
+    location: locationFilter || undefined,
+    sort: sortMode,
+    offset,
+    limit: PAGE_SIZE,
+  }, { refetchInterval: 30_000, staleTime: 2_000, retry: 1 });
   const neighborhoods = trpc.neighborhoods.list.useQuery(undefined, { staleTime: 5 * 60_000 });
   const updateStatus = trpc.residents.updateStatus.useMutation({
     onSuccess: async (_, variables) => {
@@ -125,46 +143,24 @@ export default function ResidentsManagementScreen() {
     onError: (error) => Alert.alert("Não foi possível redefinir", error.message),
   });
 
-  const allUsers = useMemo(() => (users.data ?? []) as UserRecord[], [users.data]);
-  const counts = useMemo(() => ({
-    all: allUsers.length,
-    pending: allUsers.filter((item) => item.role === "user" && item.residentStatus === "pending").length,
-    approved: allUsers.filter((item) => item.role === "user" && item.residentStatus === "approved").length,
-    blocked: allUsers.filter((item) => item.role === "user" && item.residentStatus === "blocked").length,
-    admins: allUsers.filter((item) => item.role === "admin").length,
-  }), [allUsers]);
-
-  const filteredUsers = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase("pt-BR");
-    const locationTerm = locationFilter.trim().toLocaleLowerCase("pt-BR");
-    const cutoff = periodFilter === "all" ? null : Date.now() - Number(periodFilter) * 24 * 60 * 60 * 1000;
-    const result = allUsers.filter((item) => {
-      const matchesStatus = statusFilter === "all" || item.residentStatus === statusFilter;
-      const matchesRole = roleFilter === "all" || item.role === roleFilter;
-      const matchesNeighborhood = !neighborhoodFilter || item.neighborhood === neighborhoodFilter;
-      const searchable = [item.name, item.username, item.phone, item.email, item.address].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
-      const matchesLocation = !locationTerm || (item.address ?? "").toLocaleLowerCase("pt-BR").includes(locationTerm);
-      const matchesPeriod = cutoff === null || new Date(item.createdAt).getTime() >= cutoff;
-      return matchesStatus && matchesRole && matchesNeighborhood && matchesLocation && matchesPeriod && (!term || searchable.includes(term));
-    });
-    return result.sort((first, second) => {
-      if (sortMode === "name") return (first.name ?? first.username ?? "").localeCompare(second.name ?? second.username ?? "", "pt-BR");
-      return new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime();
-    });
-  }, [allUsers, locationFilter, neighborhoodFilter, periodFilter, roleFilter, search, sortMode, statusFilter]);
+  const allUsers = useMemo(() => (users.data?.items ?? []) as UserRecord[], [users.data?.items]);
+  const counts = users.data?.counts ?? { all: 0, pending: 0, approved: 0, blocked: 0, admins: 0, residents: 0 };
+  const totalUsers = users.data?.total ?? 0;
+  const pageNumber = Math.floor(offset / PAGE_SIZE) + 1;
+  const pageCount = Math.max(1, Math.ceil(totalUsers / PAGE_SIZE));
 
   const exportCsv = async () => {
-    if (exporting || filteredUsers.length === 0) return;
+    if (exporting || allUsers.length === 0) return;
     setExporting("csv");
     try {
-      const csv = buildUsersCsv(filteredUsers);
+      const csv = buildUsersCsv(allUsers);
       const directory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
       if (!directory) throw new Error("O armazenamento temporário do dispositivo não está disponível.");
       const uri = `${directory}conecta-usuarios-${Date.now()}.csv`;
       await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: "text/csv", dialogTitle: "Compartilhar lista de usuários" });
       else Alert.alert("CSV gerado", `O arquivo foi salvo em ${uri}`);
-      setFeedback(`CSV gerado com ${filteredUsers.length} usuário(s), respeitando os filtros atuais.`);
+      setFeedback(`CSV gerado com ${allUsers.length} usuário(s) da página atual.`);
     } catch (error) {
       Alert.alert("Não foi possível exportar CSV", error instanceof Error ? error.message : "Tente novamente.");
     } finally {
@@ -173,14 +169,14 @@ export default function ResidentsManagementScreen() {
   };
 
   const exportPdf = async () => {
-    if (exporting || filteredUsers.length === 0) return;
+    if (exporting || allUsers.length === 0) return;
     setExporting("pdf");
     try {
-      const html = buildUsersPdfHtml(filteredUsers);
+      const html = buildUsersPdfHtml(allUsers);
       const file = await Print.printToFileAsync({ html });
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", dialogTitle: "Compartilhar relatório de usuários" });
       else Alert.alert("PDF gerado", `O arquivo foi salvo em ${file.uri}`);
-      setFeedback(`PDF gerado com ${filteredUsers.length} usuário(s), respeitando os filtros atuais.`);
+      setFeedback(`PDF gerado com ${allUsers.length} usuário(s) da página atual.`);
     } catch (error) {
       Alert.alert("Não foi possível exportar PDF", error instanceof Error ? error.message : "Tente novamente.");
     } finally {
@@ -221,7 +217,7 @@ export default function ResidentsManagementScreen() {
   return (
     <ScreenContainer className="px-0 pt-0" edges={["left", "right", "bottom"]}><PageHeader kicker="CONTROLE ADMINISTRATIVO" title="Painel de usuários" subtitle="Cadastros, aprovações e acesso dos moradores." /><View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 14 }}>
       <FlatList
-        data={filteredUsers}
+        data={allUsers}
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
@@ -246,8 +242,8 @@ export default function ResidentsManagementScreen() {
             <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <IconSymbol name="person.crop.circle.fill" size={21} color={colors.muted} />
               <TextInput
-                value={search}
-                onChangeText={setSearch}
+                value={searchInput}
+                onChangeText={setSearchInput}
                 placeholder="Buscar nome, usuário, telefone ou e-mail"
                 placeholderTextColor={colors.muted}
                 style={[styles.searchInput, { color: colors.foreground }]}
@@ -255,14 +251,14 @@ export default function ResidentsManagementScreen() {
                 returnKeyType="search"
                 accessibilityLabel="Buscar usuários"
               />
-              {search.length > 0 && <Pressable accessibilityRole="button" accessibilityLabel="Limpar busca" onPress={() => setSearch("")} style={({ pressed }) => [styles.clearSearch, pressed && styles.pressed]}><Text style={[styles.clearSearchText, { color: colors.muted }]}>×</Text></Pressable>}
+              {searchInput.length > 0 && <Pressable accessibilityRole="button" accessibilityLabel="Limpar busca" onPress={() => { setSearchInput(""); setSearch(""); }} style={({ pressed }) => [styles.clearSearch, pressed && styles.pressed]}><Text style={[styles.clearSearchText, { color: colors.muted }]}>×</Text></Pressable>}
             </View>
 
-            <View style={styles.filterHeader}><Text style={[styles.filterTitle, { color: colors.foreground }]}>Filtros</Text><Text style={[styles.filterResult, { color: colors.muted }]}>{filteredUsers.length} resultado(s)</Text></View>
+            <View style={styles.filterHeader}><Text style={[styles.filterTitle, { color: colors.foreground }]}>Filtros</Text><Text style={[styles.filterResult, { color: colors.muted }]}>{totalUsers} resultado(s) • página {pageNumber}/{pageCount}</Text></View>
             <Text style={[styles.filterLabel, { color: colors.muted }]}>Situação do cadastro</Text>
             <SelectionField value={statusFilter} options={statusFilters.map((value) => ({ value, label: value === "all" ? `Todos ${counts.all}` : `${statusLabels[value]} ${counts[value]}` }))} onChange={setStatusFilter} title="Filtrar por situação" placeholder="Todas as situações" accessibilityLabel="Filtrar moradores por situação" />
             <Text style={[styles.filterLabel, { color: colors.muted }]}>Tipo de conta</Text>
-            <SelectionField value={roleFilter} options={roleFilters.map((value) => ({ value, label: value === "all" ? "Todos" : value === "admin" ? `Administradores ${counts.admins}` : `Moradores ${allUsers.filter((item) => item.role === "user").length}` }))} onChange={setRoleFilter} title="Filtrar por tipo de conta" placeholder="Todos os tipos" accessibilityLabel="Filtrar moradores por tipo de conta" />
+            <SelectionField value={roleFilter} options={roleFilters.map((value) => ({ value, label: value === "all" ? `Todos ${counts.all}` : value === "admin" ? `Administradores ${counts.admins}` : `Moradores ${counts.residents}` }))} onChange={setRoleFilter} title="Filtrar por tipo de conta" placeholder="Todos os tipos" accessibilityLabel="Filtrar moradores por tipo de conta" />
             <Text style={[styles.filterLabel, { color: colors.muted }]}>Data de cadastro</Text>
             <SelectionField value={periodFilter} options={periodFilters} onChange={setPeriodFilter} title="Filtrar por data de cadastro" placeholder="Todo período" accessibilityLabel="Filtrar moradores por período" />
             <Text style={[styles.filterLabel, { color: colors.muted }]}>Bairro</Text>
@@ -274,12 +270,12 @@ export default function ResidentsManagementScreen() {
               {locationFilter.length > 0 && <Pressable accessibilityRole="button" accessibilityLabel="Limpar filtro de endereço" onPress={() => setLocationFilter("")} style={({ pressed }) => [styles.clearSearch, pressed && styles.pressed]}><Text style={[styles.clearSearchText, { color: colors.muted }]}>×</Text></Pressable>}
             </View>
             <Text style={[styles.filterLabel, { color: colors.muted }]}>Ordenação</Text>
-            <SelectionField value={sortMode} options={[{ value: "recent", label: "Mais recentes" }, { value: "name", label: "Nome A–Z" }]} onChange={setSortMode} title="Ordenar moradores" placeholder="Mais recentes" accessibilityLabel="Ordenar moradores" />
+            <SelectionField value={sortMode} options={[{ value: "name", label: "Nome A–Z (padrão)" }, { value: "recent", label: "Mais recentes" }]} onChange={setSortMode} title="Ordenar moradores" placeholder="Nome A–Z" accessibilityLabel="Ordenar moradores" />
             <View style={[styles.exportCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={styles.exportCopy}><Text style={[styles.exportTitle, { color: colors.foreground }]}>Exportar lista</Text><Text style={[styles.exportSubtitle, { color: colors.muted }]}>Serão exportados os {filteredUsers.length} registro(s) que correspondem aos filtros atuais.</Text></View>
+              <View style={styles.exportCopy}><Text style={[styles.exportTitle, { color: colors.foreground }]}>Exportar página</Text><Text style={[styles.exportSubtitle, { color: colors.muted }]}>Serão exportados os {allUsers.length} registros desta página, com os filtros atuais.</Text></View>
               <View style={styles.exportActions}>
-                <Pressable accessibilityRole="button" accessibilityLabel="Exportar lista em CSV" disabled={Boolean(exporting) || filteredUsers.length === 0} onPress={() => void exportCsv()} style={({ pressed }) => [styles.exportButton, { backgroundColor: colors.primary }, pressed && styles.pressed, (Boolean(exporting) || filteredUsers.length === 0) && styles.disabled]}><Text style={styles.exportButtonText}>{exporting === "csv" ? "Gerando…" : "CSV"}</Text></Pressable>
-                <Pressable accessibilityRole="button" accessibilityLabel="Exportar lista em PDF" disabled={Boolean(exporting) || filteredUsers.length === 0} onPress={() => void exportPdf()} style={({ pressed }) => [styles.exportButton, { backgroundColor: colors.primary }, pressed && styles.pressed, (Boolean(exporting) || filteredUsers.length === 0) && styles.disabled]}><Text style={styles.exportButtonText}>{exporting === "pdf" ? "Gerando…" : "PDF"}</Text></Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel="Exportar lista em CSV" disabled={Boolean(exporting) || allUsers.length === 0} onPress={() => void exportCsv()} style={({ pressed }) => [styles.exportButton, { backgroundColor: colors.primary }, pressed && styles.pressed, (Boolean(exporting) || allUsers.length === 0) && styles.disabled]}><Text style={styles.exportButtonText}>{exporting === "csv" ? "Gerando…" : "CSV"}</Text></Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel="Exportar lista em PDF" disabled={Boolean(exporting) || allUsers.length === 0} onPress={() => void exportPdf()} style={({ pressed }) => [styles.exportButton, { backgroundColor: colors.primary }, pressed && styles.pressed, (Boolean(exporting) || allUsers.length === 0) && styles.disabled]}><Text style={styles.exportButtonText}>{exporting === "pdf" ? "Gerando…" : "PDF"}</Text></Pressable>
               </View>
             </View>
             {feedback && <View style={[styles.feedback, { backgroundColor: colors.success + "18", borderColor: colors.success }]}><Text style={[styles.feedbackText, { color: colors.success }]}>{feedback}</Text></View>}
@@ -326,7 +322,8 @@ export default function ResidentsManagementScreen() {
             </View>
           );
         }}
-        ListEmptyComponent={<View style={styles.empty}>{users.isLoading ? <ActivityIndicator color={colors.primary} size="large" /> : <><Text style={[styles.emptyTitle, { color: colors.foreground }]}>Nenhum usuário encontrado</Text><Text style={[styles.emptyText, { color: colors.muted }]}>{search || statusFilter !== "all" || roleFilter !== "all" || neighborhoodFilter || locationFilter ? "Tente remover um filtro ou ajustar os termos da busca." : "Ainda não há cadastros disponíveis para exibição."}</Text>{(search || statusFilter !== "all" || roleFilter !== "all" || neighborhoodFilter || locationFilter) && <Pressable onPress={() => { setSearch(""); setStatusFilter("all"); setRoleFilter("all"); setPeriodFilter("all"); setNeighborhoodFilter(""); setLocationFilter(""); }} style={({ pressed }) => [styles.clearFilters, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={styles.clearFiltersText}>Limpar filtros</Text></Pressable>}</>}</View>}
+        ListEmptyComponent={<View style={styles.empty}>{users.isLoading ? <ActivityIndicator color={colors.primary} size="large" /> : <><Text style={[styles.emptyTitle, { color: colors.foreground }]}>Nenhum usuário encontrado</Text><Text style={[styles.emptyText, { color: colors.muted }]}>{search || statusFilter !== "all" || roleFilter !== "all" || neighborhoodFilter || locationFilter ? "Tente remover um filtro ou ajustar os termos da busca." : "Ainda não há cadastros disponíveis para exibição."}</Text>{(search || statusFilter !== "all" || roleFilter !== "all" || neighborhoodFilter || locationFilter) && <Pressable onPress={() => { setSearchInput(""); setSearch(""); setStatusFilter("all"); setRoleFilter("all"); setPeriodFilter("all"); setNeighborhoodFilter(""); setLocationFilter(""); }} style={({ pressed }) => [styles.clearFilters, { backgroundColor: colors.primary }, pressed && styles.pressed]}><Text style={styles.clearFiltersText}>Limpar filtros</Text></Pressable>}</>}</View>}
+        ListFooterComponent={<View style={styles.pagination}><Pressable disabled={offset === 0 || users.isFetching} onPress={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))} style={({ pressed }) => [styles.pageButton, { borderColor: colors.border, backgroundColor: colors.surface }, (pressed || offset === 0) && styles.disabled]}><Text style={[styles.pageButtonText, { color: colors.primary }]}>Anterior</Text></Pressable><Text style={[styles.pageText, { color: colors.muted }]}>Página {pageNumber} de {pageCount}</Text><Pressable disabled={offset + PAGE_SIZE >= totalUsers || users.isFetching} onPress={() => setOffset((value) => value + PAGE_SIZE)} style={({ pressed }) => [styles.pageButton, { borderColor: colors.primary, backgroundColor: colors.primary + "12" }, (pressed || offset + PAGE_SIZE >= totalUsers) && styles.disabled]}><Text style={[styles.pageButtonText, { color: colors.primary }]}>Próxima</Text></Pressable></View>}
       />
     </View></ScreenContainer>
   );
@@ -407,6 +404,10 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 13, lineHeight: 19, textAlign: "center", marginTop: 6 },
   clearFilters: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, marginTop: 14 },
   clearFiltersText: { color: "#FFFFFF", fontSize: 12, fontWeight: "900" },
+  pagination: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingVertical: 18 },
+  pageButton: { minHeight: 40, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
+  pageButtonText: { fontSize: 12, fontWeight: "900" },
+  pageText: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "800" },
   pressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },
   disabled: { opacity: 0.55 },
 });

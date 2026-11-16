@@ -73,6 +73,7 @@ export const requests = mysqlTable("requests", {
   referencePoint: text("referencePoint"),
   photoUrl: text("photoUrl"),
   status: mysqlEnum("status", ["received", "reviewing", "forwarded", "in_progress", "completed", "cancelled"]).default("received").notNull(),
+  isUrgent: boolean("isUrgent").default(false).notNull(),
   adminMessage: text("adminMessage"),
   waterAttendedAt: timestamp("waterAttendedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

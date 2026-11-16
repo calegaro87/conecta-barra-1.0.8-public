@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, ne, not } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, like, ne, not, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createPool } from "mysql2/promise";
 import {
@@ -180,14 +180,55 @@ export async function listUserRequestUpdates(userId: number) {
     .limit(100);
 }
 
-export async function listAllRequests(filters?: { status?: typeof requests.status.enumValues[number]; category?: typeof requests.category.enumValues[number]; neighborhood?: string }) {
+export type AdminRequestFilters = {
+  status?: typeof requests.status.enumValues[number];
+  category?: typeof requests.category.enumValues[number];
+  neighborhood?: string;
+  search?: string;
+  periodDays?: number;
+  attention?: "urgent" | "unanswered" | "overdue";
+  offset?: number;
+  limit?: number;
+};
+
+const OPEN_REQUEST_STATUSES = ["received", "reviewing", "forwarded", "in_progress"] as const;
+
+function dateDaysAgo(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+function requestSearchCondition(search?: string) {
+  const term = search?.trim().replace(/[%_]/g, "");
+  if (!term) return undefined;
+  const pattern = `%${term}%`;
+  return or(
+    like(requests.description, pattern),
+    like(requests.fullAddress, pattern),
+    like(requests.neighborhood, pattern),
+    like(users.name, pattern),
+    like(residentCredentials.username, pattern),
+  );
+}
+
+export async function listAllRequests(filters?: AdminRequestFilters) {
   const db = await getDb();
-  if (!db) return [];
+  const emptySummary = { total: 0, received: 0, reviewing: 0, forwarded: 0, inProgress: 0, completed: 0, urgent: 0, unanswered: 0, overdue: 0 };
+  if (!db) return { items: [], total: 0, summary: emptySummary };
   const conditions = [];
   if (filters?.status) conditions.push(eq(requests.status, filters.status));
   if (filters?.category) conditions.push(eq(requests.category, filters.category));
   if (filters?.neighborhood) conditions.push(eq(requests.neighborhood, filters.neighborhood));
-  return db.select({
+  if (filters?.periodDays) conditions.push(gt(requests.createdAt, dateDaysAgo(filters.periodDays)));
+  if (filters?.attention === "urgent") conditions.push(and(inArray(requests.status, OPEN_REQUEST_STATUSES), eq(requests.isUrgent, true)));
+  if (filters?.attention === "unanswered") conditions.push(and(eq(requests.status, "received"), lt(requests.createdAt, dateDaysAgo(1))));
+  if (filters?.attention === "overdue") conditions.push(and(inArray(requests.status, OPEN_REQUEST_STATUSES), lt(requests.createdAt, dateDaysAgo(3))));
+  const searchCondition = requestSearchCondition(filters?.search);
+  if (searchCondition) conditions.push(searchCondition);
+  const limit = Math.min(Math.max(filters?.limit ?? 50, 1), 100);
+  const offset = Math.max(filters?.offset ?? 0, 0);
+  const baseConditions = filters?.neighborhood ? [eq(requests.neighborhood, filters.neighborhood)] : [];
+  const [items, totalRows, receivedRows, reviewingRows, forwardedRows, inProgressRows, completedRows, urgentRows, unansweredRows, overdueRows] = await Promise.all([
+    db.select({
     id: requests.id,
     userId: requests.userId,
     category: requests.category,
@@ -198,6 +239,7 @@ export async function listAllRequests(filters?: { status?: typeof requests.statu
     referencePoint: requests.referencePoint,
     photoUrl: requests.photoUrl,
     status: requests.status,
+    isUrgent: requests.isUrgent,
     adminMessage: requests.adminMessage,
     waterAttendedAt: requests.waterAttendedAt,
     createdAt: requests.createdAt,
@@ -209,7 +251,34 @@ export async function listAllRequests(filters?: { status?: typeof requests.statu
     .leftJoin(users, eq(requests.userId, users.id))
     .leftJoin(residentCredentials, eq(requests.userId, residentCredentials.userId))
     .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(desc(requests.createdAt));
+    .orderBy(desc(requests.createdAt), desc(requests.id))
+    .limit(limit)
+    .offset(offset),
+    db.select({ value: count() }).from(requests).leftJoin(users, eq(requests.userId, users.id)).leftJoin(residentCredentials, eq(requests.userId, residentCredentials.userId)).where(conditions.length ? and(...conditions) : undefined),
+    db.select({ value: count() }).from(requests).where(and(...baseConditions, eq(requests.status, "received"))),
+    db.select({ value: count() }).from(requests).where(and(...baseConditions, eq(requests.status, "reviewing"))),
+    db.select({ value: count() }).from(requests).where(and(...baseConditions, eq(requests.status, "forwarded"))),
+    db.select({ value: count() }).from(requests).where(and(...baseConditions, eq(requests.status, "in_progress"))),
+    db.select({ value: count() }).from(requests).where(and(...baseConditions, eq(requests.status, "completed"))),
+    db.select({ value: count() }).from(requests).where(and(...baseConditions, inArray(requests.status, OPEN_REQUEST_STATUSES), eq(requests.isUrgent, true))),
+    db.select({ value: count() }).from(requests).where(and(...baseConditions, eq(requests.status, "received"), lt(requests.createdAt, dateDaysAgo(1)))),
+    db.select({ value: count() }).from(requests).where(and(...baseConditions, inArray(requests.status, OPEN_REQUEST_STATUSES), lt(requests.createdAt, dateDaysAgo(3)))),
+  ]);
+  return {
+    items,
+    total: Number(totalRows[0]?.value ?? 0),
+    summary: {
+      total: Number(totalRows[0]?.value ?? 0),
+      received: Number(receivedRows[0]?.value ?? 0),
+      reviewing: Number(reviewingRows[0]?.value ?? 0),
+      forwarded: Number(forwardedRows[0]?.value ?? 0),
+      inProgress: Number(inProgressRows[0]?.value ?? 0),
+      completed: Number(completedRows[0]?.value ?? 0),
+      urgent: Number(urgentRows[0]?.value ?? 0),
+      unanswered: Number(unansweredRows[0]?.value ?? 0),
+      overdue: Number(overdueRows[0]?.value ?? 0),
+    },
+  };
 }
 
 export async function getRequestOwnerId(id: number) {
@@ -262,6 +331,15 @@ export async function updateRequestStatus(data: { id: number; adminId: number; s
   await db.update(requests).set({ status: data.status, adminMessage: data.message ?? null, encryptedData: encryptedPayload({ description: existing?.description, fullAddress: existing?.fullAddress, cep: existing?.cep, neighborhood: existing?.neighborhood, referencePoint: existing?.referencePoint, photoUrl: existing?.photoUrl, adminMessage: data.message }, ["description", "fullAddress", "cep", "neighborhood", "referencePoint", "photoUrl", "adminMessage"]) }).where(eq(requests.id, data.id));
   await db.insert(requestUpdates).values({ requestId: data.id, adminId: data.adminId, status: data.status, message: data.message ?? null, encryptedData: sealFields({ message: data.message }) });
   return request[0].userId;
+}
+
+export async function updateRequestUrgency(id: number, isUrgent: boolean) {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  const current = await database.select({ id: requests.id }).from(requests).where(eq(requests.id, id)).limit(1);
+  if (!current[0]) throw new Error("Request not found");
+  await database.update(requests).set({ isUrgent }).where(eq(requests.id, id));
+  return { id, isUrgent } as const;
 }
 
 export async function listNotificationRecipients(roles?: Array<"user" | "admin">, neighborhood?: string | null) {
@@ -817,36 +895,89 @@ export async function getAdminDashboardSummary(adminUserId: number, neighborhood
   };
 }
 
-export async function listResidents(neighborhood?: string) {
-  return listUsers(neighborhood);
+export type ResidentListFilters = {
+  neighborhood?: string;
+  search?: string;
+  status?: typeof users.residentStatus.enumValues[number];
+  role?: typeof users.role.enumValues[number];
+  location?: string;
+  periodDays?: number;
+  sort?: "name" | "recent";
+  offset?: number;
+  limit?: number;
+};
+
+export async function listResidents(filters?: ResidentListFilters) {
+  return listUsers(filters);
 }
 
-export async function listUsers(neighborhood?: string) {
+export async function listUsers(filters?: ResidentListFilters) {
   const database = await getDb();
-  if (!database) return [];
-  return database.select({
-    id: users.id,
-    name: users.name,
-    avatarUrl: users.avatarUrl,
-    role: users.role,
-    residentStatus: users.residentStatus,
-    loginMethod: users.loginMethod,
-    username: residentCredentials.username,
-    address: residentCredentials.address,
-    cep: residentCredentials.cep,
-    street: residentCredentials.street,
-    number: residentCredentials.number,
-    neighborhood: residentCredentials.neighborhood,
-    phone: residentCredentials.phone,
-    sex: residentCredentials.sex,
-    email: residentCredentials.email,
-    complement: residentCredentials.complement,
-    householdSize: residentCredentials.householdSize,
-    emergencyContact: residentCredentials.emergencyContact,
-    createdAt: users.createdAt,
-    updatedAt: users.updatedAt,
-    lastSignedIn: users.lastSignedIn,
-  }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId)).where(neighborhood ? eq(residentCredentials.neighborhood, neighborhood) : undefined).orderBy(asc(users.name));
+  const emptyCounts = { all: 0, pending: 0, approved: 0, blocked: 0, admins: 0, residents: 0 };
+  if (!database) return { items: [], total: 0, counts: emptyCounts };
+  const conditions = [];
+  if (filters?.neighborhood) conditions.push(eq(residentCredentials.neighborhood, filters.neighborhood));
+  if (filters?.status) conditions.push(eq(users.residentStatus, filters.status));
+  if (filters?.role) conditions.push(eq(users.role, filters.role));
+  if (filters?.periodDays) conditions.push(gt(users.createdAt, dateDaysAgo(filters.periodDays)));
+  const search = filters?.search?.trim().replace(/[%_]/g, "");
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(or(like(users.name, pattern), like(residentCredentials.username, pattern), like(residentCredentials.email, pattern), like(residentCredentials.phone, pattern), like(residentCredentials.address, pattern)));
+  }
+  const location = filters?.location?.trim().replace(/[%_]/g, "");
+  if (location) conditions.push(or(like(residentCredentials.address, `%${location}%`), like(residentCredentials.street, `%${location}%`)));
+  const limit = Math.min(Math.max(filters?.limit ?? 50, 1), 100);
+  const offset = Math.max(filters?.offset ?? 0, 0);
+  const neighborhoodCondition = filters?.neighborhood ? eq(residentCredentials.neighborhood, filters.neighborhood) : undefined;
+  const [items, totalRows, allRows, pendingRows, approvedRows, blockedRows, adminRows, residentRows] = await Promise.all([
+    database.select({
+      id: users.id,
+      name: users.name,
+      avatarUrl: users.avatarUrl,
+      role: users.role,
+      residentStatus: users.residentStatus,
+      loginMethod: users.loginMethod,
+      username: residentCredentials.username,
+      address: residentCredentials.address,
+      cep: residentCredentials.cep,
+      street: residentCredentials.street,
+      number: residentCredentials.number,
+      neighborhood: residentCredentials.neighborhood,
+      phone: residentCredentials.phone,
+      sex: residentCredentials.sex,
+      email: residentCredentials.email,
+      complement: residentCredentials.complement,
+      householdSize: residentCredentials.householdSize,
+      emergencyContact: residentCredentials.emergencyContact,
+      createdAt: users.createdAt,
+      updatedAt: users.updatedAt,
+      lastSignedIn: users.lastSignedIn,
+    }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId))
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(filters?.sort === "recent" ? desc(users.createdAt) : asc(users.name), asc(residentCredentials.username), asc(users.id))
+      .limit(limit)
+      .offset(offset),
+    database.select({ value: count() }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId)).where(conditions.length ? and(...conditions) : undefined),
+    database.select({ value: count() }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId)).where(neighborhoodCondition),
+    database.select({ value: count() }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId)).where(and(neighborhoodCondition, eq(users.role, "user"), eq(users.residentStatus, "pending"))),
+    database.select({ value: count() }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId)).where(and(neighborhoodCondition, eq(users.role, "user"), eq(users.residentStatus, "approved"))),
+    database.select({ value: count() }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId)).where(and(neighborhoodCondition, eq(users.role, "user"), eq(users.residentStatus, "blocked"))),
+    database.select({ value: count() }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId)).where(and(neighborhoodCondition, eq(users.role, "admin"))),
+    database.select({ value: count() }).from(users).leftJoin(residentCredentials, eq(users.id, residentCredentials.userId)).where(and(neighborhoodCondition, eq(users.role, "user"))),
+  ]);
+  return {
+    items,
+    total: Number(totalRows[0]?.value ?? 0),
+    counts: {
+      all: Number(allRows[0]?.value ?? 0),
+      pending: Number(pendingRows[0]?.value ?? 0),
+      approved: Number(approvedRows[0]?.value ?? 0),
+      blocked: Number(blockedRows[0]?.value ?? 0),
+      admins: Number(adminRows[0]?.value ?? 0),
+      residents: Number(residentRows[0]?.value ?? 0),
+    },
+  };
 }
 
 export async function updateResidentStatus(userId: number, residentStatus: typeof users.residentStatus.enumValues[number]) {

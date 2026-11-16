@@ -38,10 +38,14 @@ export default function RequestDetailScreen() {
     staleTime: 1_000,
     retry: 1,
   });
-  const item = useMemo(() => (query.data ?? []).find((row) => row.id === id), [id, query.data]);
+  const item = useMemo(() => (query.data?.items ?? []).find((row) => row.id === id), [id, query.data?.items]);
   const update = trpc.requests.updateStatus.useMutation({
     onSuccess: () => void query.refetch(),
     onError: (error) => Alert.alert("Não foi possível atualizar", error.message),
+  });
+  const updateUrgency = trpc.requests.updateUrgency.useMutation({
+    onSuccess: () => void query.refetch(),
+    onError: (error) => Alert.alert("Não foi possível atualizar a urgência", error.message),
   });
   const remove = trpc.requests.delete.useMutation({
     onSuccess: () => router.replace("/admin"),
@@ -159,7 +163,10 @@ export default function RequestDetailScreen() {
               </Pressable>
             ))}
           </View>
-          <Pressable onPress={deleteItem} style={[styles.delete, { borderColor: colors.error }]}>
+          <Pressable disabled={updateUrgency.isPending} onPress={() => updateUrgency.mutate({ id, isUrgent: !item.isUrgent })} style={[styles.urgency, { borderColor: item.isUrgent ? "#DC2626" : colors.border, backgroundColor: item.isUrgent ? "#FEF2F2" : colors.surface }]}>
+            <Text style={{ color: item.isUrgent ? "#B91C1C" : colors.primary, fontWeight: "900" }}>{item.isUrgent ? "Retirar marcação de urgência" : "Marcar como urgente"}</Text>
+          </Pressable>
+          <Pressable onPress={deleteItem} style={[styles.delete, { borderColor: colors.error }]}> 
             <Text style={{ color: colors.error, fontWeight: "900" }}>Excluir solicitação</Text>
           </Pressable>
         </ScrollView>
@@ -185,5 +192,6 @@ const styles = StyleSheet.create({
   section: { fontSize: 18, fontWeight: "900", marginTop: 6 },
   statusGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   status: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 10 },
+  urgency: { borderWidth: 1, borderRadius: 14, padding: 15, alignItems: "center", marginTop: 8 },
   delete: { borderWidth: 1, borderRadius: 14, padding: 15, alignItems: "center", marginTop: 8 },
 });

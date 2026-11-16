@@ -32,8 +32,8 @@ export default function AdminReportsScreen() {
   const requests = trpc.requests.all.useQuery(undefined, { refetchInterval: 45_000, retry: false });
   const residents = trpc.residents.all.useQuery(undefined, { refetchInterval: 45_000, retry: false });
   const cutoff = period === "all" ? null : Date.now() - Number(period) * 24 * 60 * 60 * 1000;
-  const requestRows = useMemo(() => (requests.data ?? []).filter((item) => cutoff === null || new Date(item.createdAt).getTime() >= cutoff), [cutoff, requests.data]);
-  const residentRows = useMemo(() => (residents.data ?? []).filter((item) => cutoff === null || new Date(item.createdAt).getTime() >= cutoff), [cutoff, residents.data]);
+  const requestRows = useMemo(() => (requests.data?.items ?? []).filter((item) => cutoff === null || new Date(item.createdAt).getTime() >= cutoff), [cutoff, requests.data?.items]);
+  const residentRows = useMemo(() => (residents.data?.items ?? []).filter((item) => cutoff === null || new Date(item.createdAt).getTime() >= cutoff), [cutoff, residents.data?.items]);
   const statusCounts = useMemo(() => ({ received: requestRows.filter((item) => item.status === "received").length, reviewing: requestRows.filter((item) => item.status === "reviewing").length, inProgress: requestRows.filter((item) => item.status === "in_progress").length, completed: requestRows.filter((item) => item.status === "completed").length, cancelled: requestRows.filter((item) => item.status === "cancelled").length }), [requestRows]);
   const busy = requests.isLoading || residents.isLoading;
   const error = requests.error ?? residents.error;

@@ -42,6 +42,27 @@ async function canonicalNeighborhood(name: string) {
 }
 const statusSchema = z.enum(["received", "reviewing", "forwarded", "in_progress", "completed", "cancelled"]);
 const residentStatusSchema = z.enum(["pending", "approved", "blocked"]);
+const requestListSchema = z.object({
+  status: statusSchema.optional(),
+  category: categorySchema.optional(),
+  neighborhood: z.string().max(120).optional(),
+  search: z.string().max(160).optional(),
+  periodDays: z.number().int().min(1).max(365).optional(),
+  attention: z.enum(["urgent", "unanswered", "overdue"]).optional(),
+  offset: z.number().int().min(0).max(1_000_000).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+}).optional();
+const residentListSchema = z.object({
+  neighborhood: z.string().max(120).optional(),
+  search: z.string().max(160).optional(),
+  status: residentStatusSchema.optional(),
+  role: z.enum(["user", "admin"]).optional(),
+  location: z.string().max(160).optional(),
+  periodDays: z.number().int().min(1).max(365).optional(),
+  sort: z.enum(["name", "recent"]).default("name").optional(),
+  offset: z.number().int().min(0).max(1_000_000).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+}).optional();
 
 function ensureApprovedResident(user: { role: "user" | "admin"; residentStatus: "pending" | "approved" | "blocked" }) {
   if (user.role === "user" && user.residentStatus === "blocked") {
@@ -370,13 +391,19 @@ export const appRouter = router({
       void notifyNewRequest({ requestId, residentName: ctx.user.name ?? undefined, category: input.category, neighborhood });
       return requestId;
     }),
-    all: adminProcedure.input(z.object({ status: statusSchema.optional(), category: categorySchema.optional(), neighborhood: z.string().max(120).optional() }).optional()).query(({ input }) => db.listAllRequests(input)),
+    all: adminProcedure.input(requestListSchema).query(({ input }) => db.listAllRequests(input)),
     updateStatus: adminProcedure.input(z.object({ id: z.number().int().positive(), status: statusSchema, message: z.string().max(2000).optional() })).mutation(async ({ ctx, input }) => {
       const userId = await db.updateRequestStatus({ ...input, adminId: ctx.user.id });
       await notifyRequestStatusChanged({ userId, requestId: input.id, status: input.status, message: input.message });
       emit({ scopes: ["requests", "dashboard"], admins: true });
       void recordAdminAction(ctx.user.id, { action: "request_status", targetType: "request", targetId: input.id, targetUserId: userId, summary: `Solicitação #${input.id} alterada para ${input.status}.`, metadata: { status: input.status, message: input.message ?? null } });
       return { success: true } as const;
+    }),
+    updateUrgency: adminProcedure.input(z.object({ id: z.number().int().positive(), isUrgent: z.boolean() })).mutation(async ({ ctx, input }) => {
+      const result = await db.updateRequestUrgency(input.id, input.isUrgent);
+      emit({ scopes: ["requests", "dashboard"], admins: true });
+      void recordAdminAction(ctx.user.id, { action: "request_urgency", targetType: "request", targetId: input.id, summary: `Solicitação #${input.id} ${input.isUrgent ? "marcada como urgente" : "retirada da lista de urgência"}.`, metadata: { isUrgent: input.isUrgent } });
+      return result;
     }),
     delete: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const targetUserId = await db.getRequestOwnerId(input.id);
@@ -421,12 +448,12 @@ export const appRouter = router({
     delete: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await db.deleteAnnouncement(input.id); emit({ scopes: ["announcements"], everyone: true }); void recordAdminAction(ctx.user.id, { action: "announcement_delete", targetType: "announcement", targetId: input.id, summary: `Comunicado #${input.id} excluído.`, metadata: {} }); return { success: true } as const; }),
   }),
   users: router({
-    all: adminProcedure.input(z.object({ neighborhood: z.string().max(120).optional() }).optional()).query(({ input }) => db.listUsers(input?.neighborhood)),
+    all: adminProcedure.input(residentListSchema).query(({ input }) => db.listUsers(input)),
     updateStatus: adminProcedure.input(z.object({ userId: z.number().int().positive(), residentStatus: residentStatusSchema })).mutation(async ({ ctx, input }) => { const result = await db.updateResidentStatus(input.userId, input.residentStatus); emit({ scopes: ["residents", "dashboard", "me"], admins: true, userIds: [input.userId] }); void notifyResidentStatus(result); void recordAdminAction(ctx.user.id, { action: "user_status", targetType: "user", targetId: input.userId, targetUserId: input.userId, summary: `Status do usuário #${input.userId} alterado para ${input.residentStatus}.`, metadata: { residentStatus: input.residentStatus } }); return result; }),
     delete: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await db.deleteResident(input.userId); emit({ scopes: ["residents", "dashboard"], admins: true }); void recordAdminAction(ctx.user.id, { action: "user_delete", targetType: "user", targetId: input.userId, targetUserId: input.userId, summary: `Cadastro do usuário #${input.userId} excluído.`, metadata: {} }); return { success: true } as const; }),
   }),
   residents: router({
-    all: adminProcedure.input(z.object({ neighborhood: z.string().max(120).optional() }).optional()).query(({ input }) => db.listResidents(input?.neighborhood)),
+    all: adminProcedure.input(residentListSchema).query(({ input }) => db.listResidents(input)),
     updateStatus: adminProcedure.input(z.object({ userId: z.number().int().positive(), residentStatus: residentStatusSchema })).mutation(async ({ ctx, input }) => { const result = await db.updateResidentStatus(input.userId, input.residentStatus); emit({ scopes: ["residents", "dashboard", "me"], admins: true, userIds: [input.userId] }); void notifyResidentStatus(result); void recordAdminAction(ctx.user.id, { action: "user_status", targetType: "user", targetId: input.userId, targetUserId: input.userId, summary: `Status do morador #${input.userId} alterado para ${input.residentStatus}.`, metadata: { residentStatus: input.residentStatus } }); return result; }),
     delete: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await db.deleteResident(input.userId); emit({ scopes: ["residents", "dashboard"], admins: true }); void recordAdminAction(ctx.user.id, { action: "user_delete", targetType: "user", targetId: input.userId, targetUserId: input.userId, summary: `Cadastro do morador #${input.userId} excluído.`, metadata: {} }); return { success: true } as const; }),
     resetPassword: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {

@@ -237,8 +237,8 @@ export function buildNewRegistrationAdminEmail(input: RegistrationEmailDetails):
   return {
     to: ADMIN_NOTIFICATION_EMAIL || "nao-configurado@invalid.local",
     subject: `Novo cadastro confirmado — ${input.name}`,
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#17324d"><h2>Novo morador confirmou o cadastro</h2><p>O e-mail do novo usuário foi validado. O cadastro segue aguardando aprovação da gestão.</p><table style="border-collapse:collapse;width:100%;max-width:680px">${htmlRows}</table><p style="margin-top:16px">A senha e o código de verificação não são enviados nem armazenados nesta mensagem.</p></div>`,
-    text: `Novo morador confirmou o cadastro\n\nO e-mail do novo usuário foi validado. O cadastro segue aguardando aprovação da gestão.\n\n${text}\n\nA senha e o código de verificação não são enviados nesta mensagem.`,
+    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#17324d"><h2>Novo morador confirmou o cadastro</h2><p>O e-mail do novo usuário foi validado e o acesso já está disponível. A gestão pode revisar o cadastro quando necessário.</p><table style="border-collapse:collapse;width:100%;max-width:680px">${htmlRows}</table><p style="margin-top:16px">A senha e o código de verificação não são enviados nem armazenados nesta mensagem.</p></div>`,
+    text: `Novo morador confirmou o cadastro\n\nO e-mail do novo usuário foi validado e o acesso já está disponível. A gestão pode revisar o cadastro quando necessário.\n\n${text}\n\nA senha e o código de verificação não são enviados nesta mensagem.`,
   };
 }
 

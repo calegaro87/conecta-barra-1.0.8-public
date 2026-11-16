@@ -242,7 +242,7 @@ export async function notifyResidentStatus(input: { userId: number; residentStat
     ? "Seu cadastro foi aprovado. Você já pode acessar os serviços do Conecta Barra."
     : input.residentStatus === "blocked"
       ? "Seu cadastro foi bloqueado. Procure a gestão do Conecta Barra para orientações."
-      : "Seu cadastro permanece aguardando análise.";
+    : "Seu cadastro foi confirmado. Seu acesso continua disponível.";
   await notifyUser(input.userId, {
     type: "resident-status",
     category: "account",

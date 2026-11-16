@@ -5,7 +5,7 @@ import * as Device from "expo-device";
 import { Alert, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { TextInput } from "@/components/text-input";
 import { Pressable } from "@/components/pressable";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { Image } from "expo-image";
@@ -36,49 +36,61 @@ const periodFilters = [
   { value: "30", label: "30 dias" },
   { value: "90", label: "90 dias" },
 ] as const;
+const REQUEST_PAGE_SIZE = 50;
+const attentionFilters = [
+  { value: "all", label: "Toda a fila" },
+  { value: "urgent", label: "Urgentes" },
+  { value: "unanswered", label: "Sem resposta há 24h+" },
+  { value: "overdue", label: "Atrasadas há 72h+" },
+] as const;
 
 export default function AdminDashboard() {
   const colors = useColors();
   const [statusFilter, setStatusFilter] = useState<(typeof statusFilters)[number]["value"]>("all");
   const [periodFilter, setPeriodFilter] = useState<(typeof periodFilters)[number]["value"]>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [attentionFilter, setAttentionFilter] = useState<(typeof attentionFilters)[number]["value"]>("all");
+  const [requestOffset, setRequestOffset] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
   const shortageReport = trpc.reports.waterShortage.useQuery(undefined, { enabled: false });
   const [bairro, setBairro] = useState<string | undefined>(undefined);
   const bairros = trpc.neighborhoods.list.useQuery(undefined, { staleTime: 5 * 60_000 });
-  const allRequests = trpc.requests.all.useQuery(bairro ? { neighborhood: bairro } : undefined, { refetchInterval: 30_000, refetchIntervalInBackground: false, staleTime: 2_000, retry: false });
-  const residentsQuery = trpc.residents.all.useQuery(bairro ? { neighborhood: bairro } : undefined, { refetchInterval: 30_000, refetchIntervalInBackground: false, staleTime: 20_000, retry: false });
+  useEffect(() => { setRequestOffset(0); }, [bairro, statusFilter, periodFilter, searchQuery, attentionFilter]);
+  const allRequests = trpc.requests.all.useQuery({
+    neighborhood: bairro,
+    status: statusFilter === "all" ? undefined : statusFilter,
+    search: searchQuery.trim() || undefined,
+    periodDays: periodFilter === "all" ? undefined : Number(periodFilter === "today" ? 1 : periodFilter),
+    attention: attentionFilter === "all" ? undefined : attentionFilter,
+    offset: requestOffset,
+    limit: REQUEST_PAGE_SIZE,
+  }, { refetchInterval: 30_000, refetchIntervalInBackground: false, staleTime: 2_000, retry: false });
+  const residentsQuery = trpc.residents.all.useQuery({ neighborhood: bairro, search: searchQuery.trim().length >= 2 ? searchQuery.trim() : undefined, limit: 5, offset: 0, sort: "name" }, { refetchInterval: 30_000, refetchIntervalInBackground: false, staleTime: 20_000, retry: false });
   const notificationQuery = trpc.notifications.list.useQuery(undefined, { refetchInterval: 30_000, refetchIntervalInBackground: false, staleTime: 2_000, retry: false });
   const adminSummary = trpc.admin.dashboard.useQuery(bairro ? { neighborhood: bairro } : undefined, { refetchInterval: 45_000, refetchIntervalInBackground: false, staleTime: 8_000, retry: false });
   const emailDelivery = trpc.admin.emailDelivery.useQuery({ limit: 5 }, { refetchInterval: 45_000, refetchIntervalInBackground: false, staleTime: 8_000, retry: false });
   const unreadNotificationCount = (notificationQuery.data ?? []).filter((item) => !item.readAt).length;
-  const requestRows = useMemo(() => allRequests.data ?? [], [allRequests.data]);
+  const requestRows = useMemo(() => allRequests.data?.items ?? [], [allRequests.data?.items]);
+  const requestSummary = allRequests.data?.summary ?? { total: 0, received: 0, reviewing: 0, forwarded: 0, inProgress: 0, completed: 0, urgent: 0, unanswered: 0, overdue: 0 };
+  const requestTotal = allRequests.data?.total ?? 0;
+  const requestPage = Math.floor(requestOffset / REQUEST_PAGE_SIZE) + 1;
+  const requestPageCount = Math.max(1, Math.ceil(requestTotal / REQUEST_PAGE_SIZE));
   const metrics = useMemo(() => [
-    { label: "Em aberto", value: String(requestRows.filter((item) => ["received", "reviewing", "forwarded"].includes(item.status)).length), tone: "warning" as const, icon: "tray.fill" as const },
-    { label: "Em andamento", value: String(requestRows.filter((item) => item.status === "in_progress").length), tone: "primary" as const, icon: "arrow.triangle.2.circlepath" as const },
-    { label: "Concluídas", value: String(requestRows.filter((item) => item.status === "completed").length), tone: "success" as const, icon: "checkmark.circle.fill" as const },
-  ], [requestRows]);
-  const filteredRows = useMemo(() => {
-    const cutoff = periodFilter === "all" ? null : periodFilter === "today" ? new Date(new Date().setHours(0, 0, 0, 0)).getTime() : Date.now() - Number(periodFilter) * 24 * 60 * 60 * 1000;
-    return requestRows.filter((item) => {
-      const matchesStatus = statusFilter === "all" || item.status === statusFilter;
-      const matchesPeriod = cutoff === null || new Date(item.createdAt).getTime() >= cutoff;
-      const normalizedSearch = searchQuery.trim().toLocaleLowerCase("pt-BR");
-      const searchable = [item.requesterName, item.requesterUsername, item.fullAddress, item.description, categoryLabels[item.category]].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR");
-      const matchesSearch = !normalizedSearch || searchable.includes(normalizedSearch);
-      return matchesStatus && matchesPeriod && matchesSearch;
-    });
-  }, [periodFilter, requestRows, searchQuery, statusFilter]);
+    { label: "Em aberto", value: String(requestSummary.received + requestSummary.reviewing + requestSummary.forwarded), tone: "warning" as const, icon: "tray.fill" as const },
+    { label: "Em andamento", value: String(requestSummary.inProgress), tone: "primary" as const, icon: "arrow.triangle.2.circlepath" as const },
+    { label: "Concluídas", value: String(requestSummary.completed), tone: "success" as const, icon: "checkmark.circle.fill" as const },
+  ], [requestSummary.completed, requestSummary.forwarded, requestSummary.inProgress, requestSummary.received, requestSummary.reviewing]);
+  const filteredRows = requestRows;
   const residentMatches = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLocaleLowerCase("pt-BR");
     if (normalizedSearch.length < 2) return [];
-    return (residentsQuery.data ?? []).filter((resident) => [resident.name, resident.username, resident.email, resident.phone, resident.address].filter(Boolean).join(" ").toLocaleLowerCase("pt-BR").includes(normalizedSearch)).slice(0, 5);
-  }, [residentsQuery.data, searchQuery]);
+    return residentsQuery.data?.items ?? [];
+  }, [residentsQuery.data?.items, searchQuery]);
   const statusBreakdown = useMemo(() => [
-    { label: "Recebidas", value: requestRows.filter((item) => item.status === "received").length, color: colors.primary },
-    { label: "Em análise", value: requestRows.filter((item) => item.status === "reviewing").length, color: colors.warning },
-    { label: "Em andamento", value: requestRows.filter((item) => item.status === "in_progress").length, color: "#0284C7" },
-    { label: "Concluídas", value: requestRows.filter((item) => item.status === "completed").length, color: colors.success },
+    { label: "Recebidas", value: requestSummary.received, color: colors.primary },
+    { label: "Em análise", value: requestSummary.reviewing, color: colors.warning },
+    { label: "Em andamento", value: requestSummary.inProgress, color: "#0284C7" },
+    { label: "Concluídas", value: requestSummary.completed, color: colors.success },
   ], [colors.primary, colors.success, colors.warning, requestRows]);
   const categoryBreakdown = useMemo(() => {
     const counts = new Map<string, number>();
@@ -95,6 +107,7 @@ export default function AdminDashboard() {
   }, [requestRows]);
   const maxChartValue = Math.max(1, ...statusBreakdown.map((item) => item.value), ...categoryBreakdown.map((item) => item.value), ...regionBreakdown.map((item) => item.value));
   const updateStatus = trpc.requests.updateStatus.useMutation({ onSuccess: () => void allRequests.refetch(), onError: (error) => Alert.alert("Não foi possível atualizar", error.message) });
+  const updateUrgency = trpc.requests.updateUrgency.useMutation({ onSuccess: () => void allRequests.refetch(), onError: (error) => Alert.alert("Não foi possível atualizar a urgência", error.message) });
   const deleteRequest = trpc.requests.delete.useMutation({ onSuccess: () => void allRequests.refetch(), onError: (error) => Alert.alert("Não foi possível excluir", error.message) });
   const registerDevice = trpc.notifications.registerDevice.useMutation();
   const testPush = trpc.notifications.testPush.useMutation({
@@ -120,6 +133,7 @@ export default function AdminDashboard() {
     }
   };
   const confirmDeleteRequest = (id: number) => Alert.alert("Excluir solicitação?", "Esta ação remove o registro administrativo e não pode ser desfeita.", [{ text: "Cancelar", style: "cancel" }, { text: "Excluir", style: "destructive", onPress: () => deleteRequest.mutate({ id }) }]);
+  const toggleUrgency = (item: (typeof requestRows)[number]) => updateUrgency.mutate({ id: item.id, isUrgent: !item.isUrgent });
   const logout = trpc.auth.logout.useMutation();
   const signOut = () => Alert.alert("Sair do painel?", "Você precisará fazer login novamente para acessar as funções administrativas.", [{ text: "Cancelar", style: "cancel" }, { text: "Sair", style: "destructive", onPress: () => { void (async () => { await Promise.race([logout.mutateAsync({ pushToken: getCurrentPushToken() ?? undefined }).catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 3000))]); await removeSessionToken(); await clearUserInfo(); router.replace("/login"); })(); } }]);
   const openRequestActions = (item: (typeof requestRows)[number]) => { router.push({ pathname: "/admin/request-detail", params: { id: String(item.id) } }); };
@@ -134,6 +148,8 @@ export default function AdminDashboard() {
   const statusColor = (status: string) => ({ received: colors.primary, reviewing: "#D97706", forwarded: "#7C3AED", in_progress: "#0284C7", completed: colors.success, cancelled: colors.error }[status] ?? colors.muted);
   const focusRequests = (status?: (typeof statusFilters)[number]["value"]) => {
     if (status) setStatusFilter(status);
+    setAttentionFilter("all");
+    setRequestOffset(0);
     requestAnimationFrame(() => scrollViewRef.current?.scrollToEnd({ animated: true }));
   };
   const openIndicator = (label: string) => {
@@ -258,7 +274,13 @@ export default function AdminDashboard() {
           ))}
         </View>
 
-        <View style={[styles.chartCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.attentionCard, { backgroundColor: requestSummary.overdue || requestSummary.unanswered || requestSummary.urgent ? "#FFF7ED" : "#F0FDF4", borderColor: requestSummary.overdue || requestSummary.unanswered || requestSummary.urgent ? "#F59E0B" : "#16A34A" }]}>
+          <View style={styles.attentionHeader}><View style={[styles.attentionIcon, { backgroundColor: requestSummary.overdue || requestSummary.unanswered || requestSummary.urgent ? "#F59E0B" : "#16A34A" }]}><IconSymbol name="bell.fill" size={18} color="#FFFFFF" /></View><View style={styles.attentionCopy}><Text style={styles.attentionTitle}>Atenção à fila</Text><Text style={styles.attentionSubtitle}>{requestSummary.overdue} atrasada(s) • {requestSummary.unanswered} sem resposta há 24h+ • {requestSummary.urgent} urgente(s)</Text></View></View>
+          <Text style={styles.attentionHint}>Atrasada = solicitação aberta há 72h ou mais. Toque em uma opção para abrir a fila filtrada.</Text>
+          <View style={styles.attentionActions}>{(["overdue", "unanswered", "urgent"] as const).map((value) => <Pressable key={value} accessibilityRole="button" onPress={() => { setAttentionFilter(value); setRequestOffset(0); requestAnimationFrame(() => scrollViewRef.current?.scrollToEnd({ animated: true })); }} style={({ pressed }) => [styles.attentionAction, { borderColor: value === "urgent" ? "#DC2626" : "#D97706", backgroundColor: attentionFilter === value ? (value === "urgent" ? "#DC2626" : "#D97706") : "#FFFFFF" }, pressed && styles.pressed]}><Text style={[styles.attentionActionText, { color: attentionFilter === value ? "#FFFFFF" : value === "urgent" ? "#B91C1C" : "#92400E" }]}>{value === "overdue" ? `Atrasadas (${requestSummary.overdue})` : value === "unanswered" ? `Sem resposta (${requestSummary.unanswered})` : `Urgentes (${requestSummary.urgent})`}</Text></Pressable>)}</View>
+        </View>
+
+        <View style={[styles.chartCard, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
           <Text style={[styles.chartTitle, { color: colors.foreground }]}>Distribuição das solicitações</Text>
           <Text style={[styles.chartSubtitle, { color: colors.muted }]}>Dados atuais do banco compartilhado</Text>
           {statusBreakdown.map((item) => (
@@ -296,9 +318,11 @@ export default function AdminDashboard() {
         {searchQuery.trim().length >= 2 && <View style={[styles.globalSearchCard, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={styles.globalSearchHeader}><Text style={[styles.globalSearchTitle, { color: colors.foreground }]}>Moradores encontrados</Text><Text style={[styles.filterSummary, { color: colors.muted }]}>{residentMatches.length}</Text></View>{residentsQuery.isLoading ? <Text style={[styles.globalSearchHint, { color: colors.muted }]}>Buscando moradores…</Text> : residentMatches.length > 0 ? residentMatches.map((resident) => <Pressable key={resident.id} accessibilityRole="button" accessibilityLabel={`Abrir cadastro de ${resident.name ?? resident.username ?? "morador"}`} onPress={() => router.push("/admin/residents")} style={({ pressed }) => [styles.globalSearchRow, { borderTopColor: colors.border }, pressed && styles.pressed]}><View style={[styles.globalSearchAvatar, { backgroundColor: colors.primary + "18" }]}><Text style={[styles.globalSearchAvatarText, { color: colors.primary }]}>{(resident.name ?? resident.username ?? "M").trim().charAt(0).toUpperCase()}</Text></View><View style={styles.globalSearchCopy}><Text style={[styles.globalSearchName, { color: colors.foreground }]} numberOfLines={1}>{resident.name ?? resident.username ?? "Morador"}</Text><Text style={[styles.globalSearchMeta, { color: colors.muted }]} numberOfLines={1}>{resident.username ? `@${resident.username}` : resident.email ?? resident.phone ?? "Cadastro sem contato"}</Text></View><Text style={[styles.globalSearchArrow, { color: colors.primary }]}>›</Text></Pressable>) : <Text style={[styles.globalSearchHint, { color: colors.muted }]}>Nenhum morador corresponde à busca.</Text>}<Text style={[styles.globalSearchHint, { color: colors.muted }]}>Os resultados de solicitações aparecem logo abaixo com os filtros aplicados.</Text></View>}
         <Text style={[styles.filterLabel, { color: colors.muted }]}>Status</Text>
         <SelectionField value={statusFilter} options={statusFilters} onChange={setStatusFilter} title="Filtrar por status" placeholder="Todos" accessibilityLabel="Filtrar solicitações por status" />
+        <Text style={[styles.filterLabel, { color: colors.muted }]}>Prioridade e prazo</Text>
+        <SelectionField value={attentionFilter} options={attentionFilters} onChange={(value) => { setAttentionFilter(value); setRequestOffset(0); }} title="Filtrar alertas da fila" placeholder="Toda a fila" accessibilityLabel="Filtrar solicitações por prioridade e prazo" />
         <Text style={[styles.filterLabel, { color: colors.muted }]}>Pesquisar por data de criação</Text>
         <SelectionField value={periodFilter} options={periodFilters} onChange={setPeriodFilter} title="Filtrar por período" placeholder="Todo período" accessibilityLabel="Filtrar solicitações por período" />
-        {allRequests.isLoading ? <QueryState colors={colors} loading compact loadingText="Carregando solicitações…" /> : allRequests.error ? <QueryState colors={colors} loading={false} error={allRequests.error} compact errorTitle="Não foi possível carregar a fila" onRetry={() => void allRequests.refetch()} /> : <>{filteredRows.slice(0, 6).map((item) => { const color = statusColor(item.status); return <View key={item.id} style={[styles.queueItem, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.queueIndicator, { backgroundColor: color }]} /><View style={styles.queueCopy}><Text style={[styles.queueTitle, { color: colors.foreground }]}>{categoryLabels[item.category] ?? item.category}</Text><Text style={[styles.queuePlace, { color: colors.muted }]}>{item.fullAddress}</Text><Text style={[styles.queueRequester, { color: colors.foreground }]}>👤 {item.requesterName?.trim() || item.requesterUsername?.trim() || "Morador não identificado"}</Text><View style={[styles.statusBadge, { backgroundColor: color + "18" }]}><Text style={styles.statusBadgeText}>{statusLabels[item.status] ?? item.status}</Text></View></View><Text style={[styles.queueTime, { color: colors.muted }]}>{item.createdAt.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</Text><Pressable onPress={() => confirmDeleteRequest(item.id)} style={({ pressed }) => [styles.visibleDelete, { borderColor: colors.error }, pressed && styles.pressed]}><Text style={[styles.visibleDeleteText, { color: colors.error }]}>Excluir</Text></Pressable><Pressable onPress={() => openRequestActions(item)} onLongPress={() => openRequestStatusActions(item)} style={({ pressed }) => [styles.moreButton, { backgroundColor: colors.primary + "12" }, pressed && styles.pressed]}><Text style={[styles.moreText, { color: colors.primary }]}>Abrir</Text></Pressable></View>; })}{filteredRows.length === 0 && <Text style={[styles.queuePlace, { color: colors.muted }]}>{requestRows.length === 0 ? "Nenhuma solicitação cadastrada." : "Nenhuma solicitação corresponde aos filtros."}</Text>}</>}
+        {allRequests.isLoading ? <QueryState colors={colors} loading compact loadingText="Carregando solicitações…" /> : allRequests.error ? <QueryState colors={colors} loading={false} error={allRequests.error} compact errorTitle="Não foi possível carregar a fila" onRetry={() => void allRequests.refetch()} /> : <>{filteredRows.map((item) => { const color = statusColor(item.status); return <View key={item.id} style={[styles.queueItem, { backgroundColor: colors.surface, borderColor: item.isUrgent ? "#DC2626" : colors.border }]}><View style={[styles.queueIndicator, { backgroundColor: item.isUrgent ? "#DC2626" : color }]} /><View style={styles.queueCopy}><Text style={[styles.queueTitle, { color: colors.foreground }]}>{categoryLabels[item.category] ?? item.category}</Text><Text style={[styles.queuePlace, { color: colors.muted }]}>{item.fullAddress}</Text><Text style={[styles.queueRequester, { color: colors.foreground }]}>👤 {item.requesterName?.trim() || item.requesterUsername?.trim() || "Morador não identificado"}</Text><View style={styles.queueBadges}><View style={[styles.statusBadge, { backgroundColor: color + "18" }]}><Text style={styles.statusBadgeText}>{statusLabels[item.status] ?? item.status}</Text></View>{item.isUrgent && <View style={styles.urgentBadge}><Text style={styles.urgentBadgeText}>URGENTE</Text></View>}</View></View><Text style={[styles.queueTime, { color: colors.muted }]}>{new Date(item.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</Text><Pressable onPress={() => toggleUrgency(item)} disabled={updateUrgency.isPending} style={({ pressed }) => [styles.urgentToggle, { borderColor: item.isUrgent ? "#DC2626" : colors.border, backgroundColor: item.isUrgent ? "#FEF2F2" : colors.surface }, pressed && styles.pressed]}><Text style={[styles.urgentToggleText, { color: item.isUrgent ? "#B91C1C" : colors.primary }]}>{item.isUrgent ? "Retirar urgência" : "Marcar urgente"}</Text></Pressable><Pressable onPress={() => confirmDeleteRequest(item.id)} style={({ pressed }) => [styles.visibleDelete, { borderColor: colors.error }, pressed && styles.pressed]}><Text style={[styles.visibleDeleteText, { color: colors.error }]}>Excluir</Text></Pressable><Pressable onPress={() => openRequestActions(item)} onLongPress={() => openRequestStatusActions(item)} style={({ pressed }) => [styles.moreButton, { backgroundColor: colors.primary + "12" }, pressed && styles.pressed]}><Text style={[styles.moreText, { color: colors.primary }]}>Abrir</Text></Pressable></View>; })}{filteredRows.length === 0 && <Text style={[styles.queuePlace, { color: colors.muted }]}>{requestTotal === 0 ? "Nenhuma solicitação cadastrada." : "Nenhuma solicitação corresponde aos filtros."}</Text>}<View style={styles.requestPagination}><Pressable disabled={requestOffset === 0 || allRequests.isFetching} onPress={() => setRequestOffset((value) => Math.max(0, value - REQUEST_PAGE_SIZE))} style={({ pressed }) => [styles.pageButton, { borderColor: colors.border }, (pressed || requestOffset === 0) && styles.disabled]}><Text style={[styles.pageButtonText, { color: colors.primary }]}>Anterior</Text></Pressable><Text style={[styles.pageText, { color: colors.muted }]}>Página {requestPage}/{requestPageCount}</Text><Pressable disabled={requestOffset + REQUEST_PAGE_SIZE >= requestTotal || allRequests.isFetching} onPress={() => setRequestOffset((value) => value + REQUEST_PAGE_SIZE)} style={({ pressed }) => [styles.pageButton, { borderColor: colors.primary }, (pressed || requestOffset + REQUEST_PAGE_SIZE >= requestTotal) && styles.disabled]}><Text style={[styles.pageButtonText, { color: colors.primary }]}>Próxima</Text></Pressable></View></>}
 
         <Pressable onPress={() => router.push("/admin/water-shortage")} style={({ pressed }) => [styles.secondaryAction, { borderColor: colors.warning, backgroundColor: colors.warning + "12" }, pressed && styles.pressed]}>
           <IconSymbol name="drop.fill" size={20} color={colors.warning} />
@@ -410,6 +434,16 @@ const styles = StyleSheet.create({
   filterSummary: { fontSize: 12, fontWeight: "900", color: "#000000" },
   filterLabel: { fontSize: 11, fontWeight: "900", color: "#000000", marginTop: -9 },
   metrics: { flexDirection: "row", gap: 10 },
+  attentionCard: { borderWidth: 1.5, borderRadius: 18, padding: 14, gap: 10 },
+  attentionHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  attentionIcon: { width: 34, height: 34, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  attentionCopy: { flex: 1, gap: 2 },
+  attentionTitle: { fontSize: 15, fontWeight: "900", color: "#111827" },
+  attentionSubtitle: { fontSize: 11, lineHeight: 16, fontWeight: "800", color: "#374151" },
+  attentionHint: { fontSize: 11, lineHeight: 16, color: "#4B5563" },
+  attentionActions: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  attentionAction: { borderWidth: 1.2, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 7 },
+  attentionActionText: { fontSize: 10, fontWeight: "900" },
   metric: { flex: 1, borderRadius: 20, borderWidth: 0, padding: 14, shadowColor: "#0B3B8C", shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 2 },
   metricIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", marginBottom: 10 },
   metricValue: { fontSize: 27, lineHeight: 32, fontWeight: "900" },
@@ -423,6 +457,9 @@ const styles = StyleSheet.create({
   queueTitle: { fontSize: 14, fontWeight: "900", color: "#000000" },
   queuePlace: { fontSize: 12, marginTop: 4 },
   queueRequester: { fontSize: 12, fontWeight: "800", marginTop: 5 },
+  queueBadges: { flexDirection: "row", alignItems: "center", gap: 6 },
+  urgentBadge: { backgroundColor: "#FEE2E2", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginTop: 8 },
+  urgentBadgeText: { fontSize: 10, fontWeight: "900", color: "#B91C1C" },
   queueTime: { fontSize: 11, marginRight: 8 },
   statusBadge: { alignSelf: "flex-start", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginTop: 8 },
   statusBadgeText: { fontSize: 10, fontWeight: "900", color: "#000000" },
@@ -430,6 +467,12 @@ const styles = StyleSheet.create({
   visibleDeleteText: { fontSize: 10, fontWeight: "900" },
   moreButton: { borderRadius: 10, minHeight: 34, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", marginLeft: 6 },
   moreText: { fontSize: 10, fontWeight: "900" },
+  urgentToggle: { borderWidth: 1, borderRadius: 10, minHeight: 34, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", marginLeft: 6 },
+  urgentToggleText: { fontSize: 10, fontWeight: "900" },
+  requestPagination: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
+  pageButton: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 8 },
+  pageButtonText: { fontSize: 11, fontWeight: "900" },
+  pageText: { fontSize: 11, fontWeight: "800" },
   secondaryAction: { minHeight: 60, borderRadius: 16, borderWidth: 1.5, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10, marginTop: 10 },
   secondaryActionText: { fontSize: 14, fontWeight: "800" },
   primaryAction: { minHeight: 62, borderRadius: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 2 },
