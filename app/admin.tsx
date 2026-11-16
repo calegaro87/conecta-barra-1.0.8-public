@@ -56,6 +56,12 @@ type AdminRequestRow = {
 
 export default function AdminDashboard() {
   const colors = useColors();
+  const adminAccess = trpc.auth.me.useQuery(undefined, { retry: false, staleTime: 5_000 });
+  useEffect(() => {
+    if (adminAccess.isLoading) return;
+    if (adminAccess.data?.role === "admin") return;
+    router.replace(adminAccess.data?.id ? "/(tabs)" : "/login");
+  }, [adminAccess.data?.id, adminAccess.data?.role, adminAccess.isLoading]);
   const [statusFilter, setStatusFilter] = useState<(typeof statusFilters)[number]["value"]>("all");
   const [periodFilter, setPeriodFilter] = useState<(typeof periodFilters)[number]["value"]>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -200,6 +206,11 @@ export default function AdminDashboard() {
       Alert.alert("Não foi possível gerar o PDF", error instanceof Error ? error.message : "Tente novamente.");
     }
   };
+
+  if (adminAccess.isLoading) {
+    return <ScreenContainer className="px-5 pt-5"><QueryState colors={colors} loading loadingText="Verificando acesso…" /></ScreenContainer>;
+  }
+  if (adminAccess.data?.role !== "admin") return null;
 
   return (
     <ScreenContainer className="px-0 pt-0" edges={["left", "right", "bottom"]} containerClassName="bg-background">
