@@ -120,6 +120,10 @@ async function startServer() {
   server.requestTimeout = 120_000;
 
   attachRealtime(server);
+  await db.ensureAdminQueueSchema().catch((error) => {
+    console.error("[Schema] Migração da fila administrativa falhou; o servidor não será iniciado:", error);
+    throw error;
+  });
   await db.seedNeighborhoods().catch((error) => console.warn("[Seed] Bairros não semeados:", error));
 
   const port = parseInt(process.env.PORT || "3000", 10);

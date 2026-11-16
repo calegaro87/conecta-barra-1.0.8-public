@@ -82,6 +82,32 @@ export async function getDb() {
   return _db;
 }
 
+/**
+ * Garante as alterações pequenas e idempotentes necessárias à fila administrativa.
+ * O Render não executa migrations automaticamente; executar estas instruções no boot
+ * evita que uma publicação bem-sucedida fique incompatível com o schema em produção.
+ * Erros de "já existe" são seguros e ignorados para MySQL/TiDB.
+ */
+export async function ensureAdminQueueSchema() {
+  await getDb();
+  if (!_pool) return false;
+  const statements = [
+    "ALTER TABLE requests ADD COLUMN isUrgent TINYINT(1) NOT NULL DEFAULT 0",
+    "CREATE INDEX requests_admin_queue_idx ON requests (status, neighborhood, createdAt, id)",
+    "CREATE INDEX requests_urgent_idx ON requests (isUrgent, status, createdAt)",
+    "CREATE INDEX resident_credentials_neighborhood_idx ON resident_credentials (neighborhood)",
+  ];
+  for (const statement of statements) {
+    try {
+      await _pool.query(statement);
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      if (!message.includes("duplicate") && !message.includes("already exists") && !message.includes("1060") && !message.includes("1061")) throw error;
+    }
+  }
+  return true;
+}
+
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();

@@ -134,6 +134,9 @@ export const appRouter = router({
         console.warn("[Registration] Could not send verification email:", error);
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Não foi possível enviar o código de confirmação. Confira o e-mail e tente novamente." });
       }
+      // O cadastro já existe antes da confirmação do código. Invalida a fila dos
+      // administradores neste momento para que ele apareça sem depender de refresh.
+      emit({ scopes: ["residents", "dashboard", "notifications"], admins: true });
       return { success: true, username, email, verificationRequired: true } as const;
     }),
     verifyEmail: publicProcedure.input(z.object({ username: z.string().min(4).max(64), code: z.string().regex(/^\d{6}$/) })).mutation(async ({ input }) => {
