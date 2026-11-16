@@ -173,7 +173,7 @@ export default function LoginScreen() {
   if (verificationVisible) {
     return (
       <ScreenContainer className="px-5 pt-8" containerClassName="bg-background">
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={[styles.content, { paddingBottom: 220 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           <View style={styles.verificationCard}>
             <Text style={[styles.verificationTitle, { color: colors.foreground }]}>Confirme seu e-mail</Text>
             <Text style={[styles.verificationText, { color: colors.muted }]}>Enviamos um código de 6 dígitos para {email}. Digite-o abaixo para validar o cadastro.</Text>
@@ -182,7 +182,7 @@ export default function LoginScreen() {
             <Pressable disabled={verificationBusy} onPress={() => resendVerification.mutate({ username: verificationUsername })} style={({ pressed }) => [styles.secondaryAction, { borderColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.secondaryActionText, { color: colors.primary }]}>{resendVerification.isPending ? "Reenviando…" : "Reenviar código"}</Text></Pressable>
             <Pressable disabled={verificationBusy} onPress={() => setVerificationVisible(false)} style={styles.switch}><Text style={[styles.switchText, { color: colors.muted }]}>Voltar ao cadastro</Text></Pressable>
           </View>
-        </ScrollView></KeyboardAvoidingView>
+        </ScrollView>
       </ScreenContainer>
     );
   }
@@ -192,8 +192,8 @@ export default function LoginScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style="light" />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"}>
-        <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ flexGrow: 1, paddingBottom: 220 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
           <LinearGradient colors={BRAND.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={ns.hero}>
             <View style={ns.heroBubble} />
             <AppMark size={84} />

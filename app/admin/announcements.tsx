@@ -122,8 +122,8 @@ export default function AdminAnnouncementsScreen() {
 
   return (
     <ScreenContainer className="px-0 pt-0" edges={["left", "right", "bottom"]}><PageHeader kicker="GESTÃO" title="Comunicados" subtitle="Publique, edite ou exclua as informações oficiais." /><View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 14 }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false} contentContainerStyle={[styles.content, { paddingBottom: 220 }]}>
           <View style={styles.header}>
             <View style={{ width: 55 }} />
           </View>

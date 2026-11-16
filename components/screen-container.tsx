@@ -64,7 +64,10 @@ export function ScreenContainer({
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 24}
+          // Android usa softwareKeyboardLayoutMode="resize". Um offset aqui
+          // subtrai a altura da janela uma segunda vez e oculta o campo focado.
+          keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+          enabled
         >
           <View className={cn("flex-1", className)}>{children}</View>
         </KeyboardAvoidingView>

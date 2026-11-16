@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { TextInput } from "@/components/text-input";
 import { Pressable } from "@/components/pressable";
 import { router } from "expo-router";
@@ -38,8 +38,7 @@ export default function ForgotPasswordScreen() {
   const busy = request.isPending || reset.isPending;
 
   return <ScreenContainer className="px-5 pt-5" edges={["top", "left", "right", "bottom"]}>
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+    <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={[styles.content, { paddingBottom: 220 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Pressable accessibilityRole="button" accessibilityLabel="Voltar ao login" onPress={() => router.replace("/login")} style={({ pressed }) => [styles.back, { borderColor: colors.primary }, pressed && styles.pressed]}><Text style={[styles.backText, { color: colors.primary }]}>‹ Voltar ao login</Text></Pressable>
         <View style={styles.heading}><Text style={[styles.eyebrow, { color: colors.primary }]}>RECUPERAÇÃO DE ACESSO</Text><Text style={[styles.title, { color: colors.foreground }]}>Esqueci minha senha</Text><Text style={[styles.subtitle, { color: colors.muted }]}>Enviaremos um código temporário para o e-mail associado ao seu usuário.</Text></View>
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -56,8 +55,7 @@ export default function ForgotPasswordScreen() {
           </>}
         </View>
         <Text style={[styles.privacy, { color: colors.muted }]}>Por segurança, a tela não revela se o usuário existe. O código expira em 10 minutos e só pode ser usado uma vez.</Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </ScrollView>
   </ScreenContainer>;
 }
 
